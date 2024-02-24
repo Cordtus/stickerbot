@@ -1,4 +1,9 @@
+const fs = require('fs');
+const path = require('path');
+const { tempDir } = require('./fileHandling');
+
 const sessions = {};
+
 
 function getSession(chatId) {
     if (!sessions[chatId]) {
@@ -17,7 +22,6 @@ function purgeSessions() {
         }
     });
 }
-
 
 setInterval(purgeSessions, 3600000); // Run every hour
 
