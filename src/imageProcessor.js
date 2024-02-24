@@ -97,11 +97,16 @@ async function processImageContent(ctx) {
 async function processStickerMessage(ctx) {
     const { sticker } = ctx.message;
     try {
+        // Fetch the file information for the sticker, including its original extension
+        const fileInfo = await ctx.telegram.getFile(sticker.file_id);
+        const fileExtension = fileInfo.file_path.split('.').pop();
+        const originalFilename = `sticker.${fileExtension}`; // Maintain original file extension
+
         // Fetch the file link for the sticker
         const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
 
-        // Send the sticker file as a document back to the user
-        await ctx.replyWithDocument({ url: fileLink, filename: 'sticker.png' });
+        // Send the sticker file as a document back to the user with its original extension
+        await ctx.replyWithDocument({ url: fileLink, filename: originalFilename });
     } catch (err) {
         console.error(err); // Log the error
         ctx.reply('There was an error sending your sticker.');
