@@ -101,7 +101,8 @@ async function processStickerMessage(ctx) {
     const fileLink = await ctx.telegram.getFileLink(fileId);
     
     // Since we're focusing on native handling, treat all stickers as .webp for simplicity
-    const filename = `sticker.webp`;
+    const fileExt = sticker.is_animated ? 'webm' : 'webp'; // Use 'webm' for animated and 'webp' for static
+    const filename = `sticker.${fileExt}`;
     const filePath = path.join(tempDir, filename);
 
     try {
