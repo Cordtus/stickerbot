@@ -3,7 +3,6 @@ const fs = require('fs');
 const { Telegraf } = require('telegraf');
 const { processImageContent, processStickerMessage } = require('./imageProcessor');
 const { getSession } = require('./sessionManager');
-const userId = ctx.from.id;
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 bot.start((ctx) => {

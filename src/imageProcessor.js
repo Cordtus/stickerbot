@@ -4,7 +4,6 @@ const fs = require('fs');
 const path = require('path');
 const SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
 
-
 // processes both photos and uncompressed images sent as document
 async function processImage(ctx, fileId) {
     const fileLink = await ctx.telegram.getFileLink(fileId);
@@ -52,6 +51,7 @@ async function processImage(ctx, fileId) {
 }
 
 async function processImageContent(ctx) {
+    const userId = ctx.from.id;
     let fileId;
     let fileSize;
     let mimeType;
@@ -104,12 +104,15 @@ async function processStickerMessage(ctx) {
     const fileId = sticker.file_id;
     const userId = ctx.from.id;
     const timestamp = Date.now();
-    const fileExt = sticker.is_animated ? 'webm' : 'webp';
+    const fileExt = sticker.is_animated ? 'webm' : 'webp'; // Adjusted for correct file extension
     const originalFilename = `${userId}-${timestamp}-sticker.${fileExt}`;
     const responseFilename = `resp-${originalFilename}`;
-    const filePath = path.join(tempDir, originalFilename);
-
+    const filePath = path.join(tempDir, originalFilename); // Use the 'temp' directory
     const fileLink = await ctx.telegram.getFileLink(fileId);
+
+    console.log(`Downloading sticker: ${fileLink}`);
+    console.log(`Original filename: ${originalFilename}`);
+    console.log(`Response filename: ${responseFilename}`);
 
     try {
       const response = await axios({ url: fileLink, responseType: 'stream' });
@@ -118,10 +121,12 @@ async function processStickerMessage(ctx) {
       response.data.pipe(writer);
 
       return new Promise((resolve, reject) => {
-        writer.on('finish', () => resolve({ filePath, filename: responseFilename }));
+        writer.on('finish', () => {
+          console.log(`File saved as: ${filePath}`);
+          resolve({ filePath, filename: responseFilename });
+        });
         writer.on('error', err => {
-          console.error(err);
-          ctx.reply('There was an error processing your sticker.');
+          console.error(`Error saving file: ${err}`);
           if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
           }
@@ -129,7 +134,7 @@ async function processStickerMessage(ctx) {
         });
       });
     } catch (err) {
-      console.error(err);
+      console.error(`Error downloading sticker: ${err}`);
       ctx.reply('There was an error processing your sticker.');
       return null;
     }
