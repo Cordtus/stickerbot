@@ -102,7 +102,7 @@ async function processStickerMessage(ctx) {
   
     // Define file extension based on whether the sticker is animated or static
     // Telegram uses .webp for static stickers and .tgs for animated stickers
-    const fileExt = sticker.is_animated ? 'tgs' : 'webp'; 
+    const fileExt = sticker.is_animated ? 'webp' : 'tgs'; 
     const filename = `sticker.${fileExt}`;
     const filePath = path.join(tempDir, filename);
   
