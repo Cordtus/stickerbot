@@ -1,8 +1,9 @@
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
-const processImageMessage = require('./imageProcessor');
+const { processImageMessage, processImageFileMessage } = require('./imageProcessor');
 const { getSession } = require('./sessionManager');
 const { handleMessage } = require('./messageHandlers');
+
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
@@ -20,8 +21,8 @@ bot.start((ctx) => {
     }
   );
 });
-
 bot.on('photo', processImageMessage);
+bot.on('document', processImageFileMessage);
 bot.on('sticker', ctx => {
     if (ctx.message.sticker.is_animated) {
         ctx.reply('Currently, animated stickers are not supported. Please send a static image or sticker.');

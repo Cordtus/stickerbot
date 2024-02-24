@@ -3,51 +3,33 @@ const sharp = require('sharp');
 
 const SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
 
-async function processImageMessage(ctx) {
-    // Check if the message contains a photo
-    if (!ctx.message.photo) {
-        ctx.reply('Please send a valid image file.');
-        return;
-    }
-
-    // Get the file ID of the photo with the highest resolution
-    const fileId = ctx.message.photo.pop().file_id;
-    const fileInfo = await ctx.telegram.getFile(fileId);
-
-    // Check if the file is an image and does not exceed the size limit
-    if (!fileInfo.file_path || !fileInfo.mime_type.startsWith('image/')) {
-        ctx.reply('Only image files are allowed.');
-        return;
-    } else if (fileInfo.file_size > SIZE_LIMIT) {
-        ctx.reply('The file size exceeds the 50MB limit. Please send a smaller image.');
-        return;
-    }
-
+// This function processes both photos and uncompressed images sent as documents.
+async function processImage(ctx, fileId) {
     const fileLink = await ctx.telegram.getFileLink(fileId);
 
     try {
-        // download image
+        // Download image
         const response = await axios({ url: fileLink, responseType: 'arraybuffer' });
         const buffer = Buffer.from(response.data, 'binary');
 
-        // get metadata to calculate resizing
+        // Get metadata to calculate resizing
         const metadata = await sharp(buffer).metadata();
 
-        // calculate height plud  80px is <512px
-        const maxHeight = 512 - 80; // max image height
+        // Calculate height plus 80px is <512px
+        const maxHeight = 512 - 80; // Max image height
         let newHeight = metadata.height;
         let newWidth = metadata.width;
 
-        // if adding 80px exceeds 512, resize
+        // If adding 80px exceeds 512, resize
         if (newHeight > maxHeight) {
-            // calculate new dimensions, maintain aspect ratio
+            // Calculate new dimensions, maintain aspect ratio
             const aspectRatio = metadata.width / metadata.height;
             newHeight = maxHeight;
             newWidth = Math.round(maxHeight * aspectRatio);
         }
 
-        // process buffer
-        sharp(buffer)
+        // Process buffer
+        return sharp(buffer)
             .resize(newWidth, newHeight, {
                 fit: sharp.fit.inside,
                 withoutEnlargement: true
@@ -59,22 +41,66 @@ async function processImageMessage(ctx) {
                 right: 0,
                 background: { r: 0, g: 0, b: 0, alpha: 0 }
             })
-            .toBuffer()
-            .then(processedBuffer => {
-                // send processed image
-                ctx.replyWithPhoto({ source: processedBuffer }).then(() => {
-                    ctx.reply('If you want to format another image, please upload it.');
-                });
-            })
-            .catch(err => {
-                console.error(err);
-                ctx.reply('There was an error processing your image.');
-            });
-
+            .toBuffer();
     } catch (err) {
         console.error(err);
-        ctx.reply('There was an error downloading your image.');
+        ctx.reply('There was an error processing your image.');
+        return null;
     }
 }
 
-module.exports = processImageMessage;
+// Handler for images sent as 'photo'
+async function processImageMessage(ctx) {
+    if (!ctx.message.photo) {
+        ctx.reply('Please send a valid image file.');
+        return;
+    }
+
+    const fileId = ctx.message.photo.pop().file_id;
+    const fileInfo = await ctx.telegram.getFile(fileId);
+
+    if (!fileInfo || !fileInfo.file_path) {
+        ctx.reply('There was an issue with the file you sent. Please try again.');
+        return;
+    }
+
+    if (fileInfo.file_size > SIZE_LIMIT) {
+        ctx.reply('The file size exceeds the 50MB limit. Please send a smaller image.');
+        return;
+    }
+
+    const processedBuffer = await processImage(ctx, fileId);
+    if (processedBuffer) {
+        ctx.replyWithPhoto({ source: processedBuffer }).then(() => {
+            ctx.reply('If you want to format another image, please upload it.');
+        });
+    }
+}
+
+// Handler for images sent as 'document'
+async function processImageFileMessage(ctx) {
+    if (!ctx.message.document) {
+        ctx.reply('Please send a valid image file.');
+        return;
+    }
+
+    const document = ctx.message.document;
+    if (document.mime_type && !document.mime_type.startsWith('image/')) {
+        ctx.reply('Only image files are allowed.');
+        return;
+    }
+
+    if (document.file_size > SIZE_LIMIT) {
+        ctx.reply('The file size exceeds the 50MB limit. Please send a smaller image.');
+        return;
+    }
+
+    const processedBuffer = await processImage(ctx, document.file_id);
+    if (processedBuffer) {
+        ctx.replyWithPhoto({ source: processedBuffer }).then(() => {
+            ctx.reply('If you want to format another image, please upload it.');
+        });
+    }
+}
+
+module.exports = { processImageMessage, processImageFileMessage };
