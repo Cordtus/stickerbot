@@ -1,6 +1,7 @@
 const sharp = require('sharp');
 const axios = require('axios'); // Ensure axios is required
 const path = require('path'); // Ensure path is required
+const fs = require('fs');
 const { ensureTempDirectory, downloadAndSaveFile, tempDir } = require('./fileHandling');
 const SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
 
@@ -98,24 +99,60 @@ async function processStickerMessage(ctx) {
     const { sticker, from } = ctx.message;
     const userId = from.id;
     const timestamp = Date.now();
-    
+
     try {
         const fileInfo = await ctx.telegram.getFile(sticker.file_id);
         const fileExtension = fileInfo.file_path.split('.').pop();
-        const originalFilename = `${timestamp}-${userId}-sticker.${fileExtension}`; // Prepend with timestamp and userId
 
-        const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
+        // Skip processing for animated stickers (which are typically .tgs files)
+        if (fileExtension !== 'tgs') {
+            const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
+            const response = await axios({ url: fileLink, responseType: 'arraybuffer' });
+            const buffer = Buffer.from(response.data, 'binary');
+            
+            // Process image: resize and add 80px space
+            const processedBuffer = await sharp(buffer)
+                .metadata()
+                .then(metadata => {
+                    const maxHeight = 512 - 80; // max height
+                    let newHeight = metadata.height;
+                    let newWidth = metadata.width;
 
-        // Download, save, and rename the file to include userId and timestamp
-        const savedFilePath = path.join(tempDir, originalFilename);
-        await downloadAndSaveFile(fileLink, savedFilePath);
+                    // If adding 80px exceeds 512, resize
+                    if (newHeight > maxHeight) {
+                        const aspectRatio = metadata.width / metadata.height;
+                        newHeight = maxHeight;
+                        newWidth = Math.round(maxHeight * aspectRatio);
+                    }
 
-        // Send the saved file as a document
-        await ctx.replyWithDocument({ source: fs.createReadStream(savedFilePath), filename: originalFilename });
+                    return sharp(buffer)
+                        .resize(newWidth, newHeight, {
+                            fit: sharp.fit.inside,
+                            withoutEnlargement: true
+                        })
+                        .extend({
+                            top: 0,
+                            bottom: 80, // add 80 px transparent space to bottom
+                            left: 0,
+                            right: 0,
+                            background: { r: 0, g: 0, b: 0, alpha: 0 }
+                        })
+                        .toBuffer();
+                });
+
+            // Generate filename and save the processed sticker
+            const originalFilename = `${timestamp}-${userId}-sticker.${fileExtension}`; // Prepend with timestamp and userId
+            const savedFilePath = path.join(tempDir, originalFilename);
+            fs.writeFileSync(savedFilePath, processedBuffer);
+
+            // Send the processed file as a document
+            await ctx.replyWithDocument({ source: fs.createReadStream(savedFilePath), filename: originalFilename });
+        } else {
+            // For animated stickers, you might want to handle them differently or skip processing
+            ctx.reply('Animated stickers are not supported for custom processing.');
+        }
     } catch (err) {
         console.error(err);
-        ctx.reply('There was an error sending your sticker.');
+        ctx.reply('There was an error processing your sticker.');
     }
 }
-
-module.exports = { processImageContent, processStickerMessage };
