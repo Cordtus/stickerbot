@@ -11,11 +11,13 @@ function purgeSessions() {
     const now = new Date();
     Object.keys(sessions).forEach(chatId => {
         if (now - sessions[chatId].timestamp > 21600000) { // 6 hours in milliseconds
+            // Delete saved images for this session
+            sessions[chatId].images.forEach(image => fs.unlinkSync(path.join(tempDir, image.filename)));
             delete sessions[chatId];
-            // Additionally, delete any saved images related to this session from local storage
         }
     });
 }
+
 
 setInterval(purgeSessions, 3600000); // Run every hour
 
