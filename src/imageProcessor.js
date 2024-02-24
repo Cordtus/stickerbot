@@ -99,31 +99,24 @@ async function processStickerMessage(ctx) {
     const sticker = ctx.message.sticker;
     const fileId = sticker.file_id;
     const fileLink = await ctx.telegram.getFileLink(fileId);
-  
-    // Correctly define the file extension for static and animated stickers
-    const fileExt = sticker.is_animated ? 'tgs' : 'webp'; // Use 'webp' for static and 'tgs' for animated
-    const filename = `sticker.${fileExt}`;
+    
+    // Since we're focusing on native handling, treat all stickers as .webp for simplicity
+    const filename = `sticker.webp`;
     const filePath = path.join(tempDir, filename);
-  
+
     try {
       const response = await axios({ url: fileLink, responseType: 'stream' });
       const writer = fs.createWriteStream(filePath);
 
       response.data.pipe(writer);
-  
+
       return new Promise((resolve, reject) => {
-        writer.on('finish', () => {
-          resolve({ filePath, filename }); // Resolve with both filePath and filename
-        });
-  
+        writer.on('finish', () => resolve({ filePath, filename }));
         writer.on('error', err => {
           console.error(err);
           ctx.reply('There was an error processing your sticker.');
-          // Clean up any files that may have been partially written
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
-          reject(err); // Reject on error
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+          reject(err);
         });
       });
     } catch (err) {
@@ -132,6 +125,5 @@ async function processStickerMessage(ctx) {
       return null;
     }
 }
-
 
   module.exports = { processImageContent, processStickerMessage };
