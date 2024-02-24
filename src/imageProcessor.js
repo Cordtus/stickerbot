@@ -104,7 +104,8 @@ async function processStickerMessage(ctx) {
     const fileId = sticker.file_id;
     const userId = ctx.from.id;
     const timestamp = Date.now();
-    const fileExt = sticker.is_animated ? 'webm' : 'webp'; // Adjusted for correct file extension
+    // Correctly determine the file extension
+    const fileExt = sticker.is_animated ? 'webm' : 'webp';
     const originalFilename = `${userId}-${timestamp}-sticker.${fileExt}`;
     const responseFilename = `resp-${originalFilename}`;
     const filePath = path.join(tempDir, originalFilename); // Use the 'temp' directory
@@ -115,28 +116,28 @@ async function processStickerMessage(ctx) {
     console.log(`Response filename: ${responseFilename}`);
 
     try {
-      const response = await axios({ url: fileLink, responseType: 'stream' });
-      const writer = fs.createWriteStream(filePath);
+        const response = await axios({ url: fileLink, responseType: 'stream' });
+        const writer = fs.createWriteStream(filePath);
 
-      response.data.pipe(writer);
+        response.data.pipe(writer);
 
-      return new Promise((resolve, reject) => {
-        writer.on('finish', () => {
-          console.log(`File saved as: ${filePath}`);
-          resolve({ filePath, filename: responseFilename });
+        return new Promise((resolve, reject) => {
+            writer.on('finish', () => {
+                console.log(`File saved as: ${filePath}`);
+                resolve({ filePath, filename: responseFilename });
+            });
+            writer.on('error', err => {
+                console.error(`Error saving file: ${err}`);
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+                reject(err);
+            });
         });
-        writer.on('error', err => {
-          console.error(`Error saving file: ${err}`);
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
-          reject(err);
-        });
-      });
     } catch (err) {
-      console.error(`Error downloading sticker: ${err}`);
-      ctx.reply('There was an error processing your sticker.');
-      return null;
+        console.error(`Error downloading sticker: ${err}`);
+        ctx.reply('There was an error processing your sticker.');
+        return null;
     }
 }
 
