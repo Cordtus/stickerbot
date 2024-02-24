@@ -14,24 +14,26 @@ bot.start((ctx) => {
 
 bot.on('photo', processImageContent);
 bot.on('document', processImageContent);
+
 bot.on('sticker', async (ctx) => {
   const result = await processStickerMessage(ctx);
   if (result && result.filePath && result.filename) {
     await ctx.replyWithDocument({ source: result.filePath, filename: result.filename })
       .then(() => {
-        // Delete the file after sending it
+        // delete file after send
         fs.unlinkSync(result.filePath);
       })
       .catch(err => {
         console.error(err);
         ctx.reply('There was an error sending your sticker.');
-        // Make sure to delete the file even if sending fails
+        // delete file even if send fails
         if (fs.existsSync(result.filePath)) {
           fs.unlinkSync(result.filePath);
         }
       });
   }
 });
+
 
 bot.launch();
 console.log('Bot is running');

@@ -100,14 +100,12 @@ async function processStickerMessage(ctx) {
     const fileId = sticker.file_id;
     const fileLink = await ctx.telegram.getFileLink(fileId);
   
-    // Define file extension based on whether the sticker is animated or static
-    // Telegram uses .webp for static stickers and .tgs for animated stickers
-    const fileExt = sticker.is_animated ? 'webp' : 'tgs'; 
+    // Correctly define the file extension for static and animated stickers
+    const fileExt = sticker.is_animated ? 'tgs' : 'webp'; // Use 'webp' for static and 'tgs' for animated
     const filename = `sticker.${fileExt}`;
     const filePath = path.join(tempDir, filename);
   
     try {
-      // Download the sticker
       const response = await axios({ url: fileLink, responseType: 'stream' });
       const writer = fs.createWriteStream(filePath);
 
@@ -121,6 +119,10 @@ async function processStickerMessage(ctx) {
         writer.on('error', err => {
           console.error(err);
           ctx.reply('There was an error processing your sticker.');
+          // Clean up any files that may have been partially written
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
           reject(err); // Reject on error
         });
       });
@@ -130,5 +132,6 @@ async function processStickerMessage(ctx) {
       return null;
     }
 }
+
 
   module.exports = { processImageContent, processStickerMessage };
