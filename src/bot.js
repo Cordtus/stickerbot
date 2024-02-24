@@ -12,15 +12,8 @@ bot.start((ctx) => {
   session.lastAction = 'start';
   ctx.reply(
     'Welcome! Please send me an image or a static sticker.',
-    {
-      reply_markup: {
-        keyboard: [[{ text: 'Start' }]],
-        resize_keyboard: true,
-        one_time_keyboard: true
-      }
-    }
   );
-});
+
 bot.on('photo', processImageMessage);
 bot.on('document', processImageFileMessage);
 bot.on('sticker', ctx => {
