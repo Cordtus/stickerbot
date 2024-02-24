@@ -1,4 +1,5 @@
 require('dotenv').config();
+const fs = require('fs');
 const { Telegraf } = require('telegraf');
 const { processImageContent, processStickerMessage } = require('./imageProcessor');
 const { getSession } = require('./sessionManager');
