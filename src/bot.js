@@ -11,6 +11,13 @@ bot.start((ctx) => {
   ctx.reply('Welcome! Please send me an image or a static sticker.');
 });
 
+
+bot.on('message', (ctx) => {
+  const message = ctx.message;
+  if (message.text && !message.photo && !message.document && !message.sticker) {
+      return;
+  }
+});
 bot.on('photo', processImageContent);
 bot.on('document', processImageContent);
 
@@ -31,6 +38,7 @@ bot.on('sticker', async (ctx) => {
         }
       });
   }
+  
 });
 
 bot.launch();
