@@ -1,15 +1,21 @@
+const axios = require('axios');
 const sharp = require('sharp');
 const { Telegraf } = require('telegraf');
 
 async function processImageMessage(ctx) {
     const fileId = ctx.message.photo.pop().file_id;
     const fileLink = await ctx.telegram.getFileLink(fileId);
-
-    sharp(fileLink)
-        .resize(512, 512, {
-            fit: sharp.fit.inside,
-            withoutEnlargement: true
-        })
+  
+    // Download the image using axios
+    const response = await axios({ url: fileLink, responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data, 'binary');
+  
+    // Now you can use the buffer with sharp
+    sharp(buffer)
+      .resize(512, 512, {
+        fit: sharp.fit.inside,
+        withoutEnlargement: true
+      })
         .extend({
             top: 0,
             bottom: 80, // Adjust this dynamically based on image dimensions if necessary
