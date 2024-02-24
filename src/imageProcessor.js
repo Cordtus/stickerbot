@@ -1,8 +1,8 @@
-const axios = require('axios');
 const sharp = require('sharp');
-const fs = require('fs');
-const path = require('path');
+const { ensureTempDirectory, downloadAndSaveFile, tempDir } = require('./fileHandling');
 const SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
+
+ensureTempDirectory(); // Ensure temp directory is available
 
 // processes both photos and uncompressed images sent as document
 async function processImage(ctx, fileId) {
@@ -93,52 +93,27 @@ async function processImageContent(ctx) {
     }
 }
 
-// Ensure the 'temp' directory exists
-const tempDir = path.join(__dirname, 'temp');
-if (!fs.existsSync(tempDir)) {
-  fs.mkdirSync(tempDir, { recursive: true });
-}
-
 async function processStickerMessage(ctx) {
-    const sticker = ctx.message.sticker;
-    const fileId = sticker.file_id;
-    const userId = ctx.from.id;
-    const timestamp = Date.now();
-    const fileLink = await ctx.telegram.getFileLink(fileId);
+    const { sticker, from } = ctx.message;
+    const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
+    const fileExtension = fileLink.split('.').pop(); // Extract the file extension from the URL
 
-    // Extract file extension from fileLink
-    const fileExtension = fileLink.split('.').pop();
-    
-    // Use the extracted file extension for filenames
+    const userId = from.id;
+    const timestamp = Date.now();
     const originalFilename = `${userId}-${timestamp}-sticker.${fileExtension}`;
-    const responseFilename = `resp-${originalFilename}`;
     const filePath = path.join(tempDir, originalFilename);
 
-    console.log(`Downloading sticker from: ${fileLink}`);
-    console.log(`File extension: ${fileExtension}`);
-    console.log(`Saving as: ${filePath}`);
-
     try {
-        const response = await axios({ url: fileLink, responseType: 'stream' });
-        const writer = fs.createWriteStream(filePath);
-
-        response.data.pipe(writer);
-
-        return new Promise((resolve, reject) => {
-            writer.on('finish', () => {
-                console.log(`File saved successfully: ${filePath}`);
-                resolve({ filePath, filename: responseFilename });
+        await downloadAndSaveFile(fileLink, filePath);
+                resolve(filePath); // No need to resolve with an object if only filePath is used later
             });
-            writer.on('error', err => {
-                console.error(`Error saving the file: ${err}`);
-                ctx.reply('There was an error processing your sticker.');
+            writer.on('error', (err) => {
+                console.error(`Error while saving the file: ${err}`);
                 reject(err);
             });
         });
     } catch (err) {
-        console.error(`Error downloading the sticker: ${err}`);
         ctx.reply('There was an error processing your sticker.');
-        return null;
     }
 }
 
