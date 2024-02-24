@@ -11,12 +11,11 @@ async function processImage(ctx, fileId) {
     const fileLink = await ctx.telegram.getFileLink(fileId);
 
     try {
-        // Download image
         const response = await axios({ url: fileLink, responseType: 'arraybuffer' });
         const buffer = Buffer.from(response.data, 'binary');
 
-        // Get metadata to calculate resizing
-        const metadata = await sharp(buffer).metadata();
+        try {
+            const metadata = await sharp(buffer).metadata();
 
         // Calculate height plus 80px is <512px
         const maxHeight = 512 - 80; // max height
@@ -42,13 +41,22 @@ async function processImage(ctx, fileId) {
                 bottom: 80, // add 80 px transparent space to bottom
                 left: 0,
                 right: 0,
-                background: { r: 0, g: 0, b: 0, alpha: 0 }
+                background: { r: 0, g: 0, b: 0, alpha: 1 }
             })
             .toBuffer();
+        } catch (err) {
+            if (err.message.includes('unsupported image format')) {
+                console.error('Unsupported image format:', err);
+                ctx.reply('Sorry, the provided image format is not supported.');
+            } else {
+                // Handle other unexpected errors
+                console.error('Error processing the image:', err);
+                ctx.reply('There was an error processing your image.');
+            }
+        }
     } catch (err) {
-        console.error(err);
-        ctx.reply('There was an error processing your image.');
-        return null;
+        console.error('Error downloading the image:', err);
+        ctx.reply('There was an error downloading your image.');
     }
 }
 
@@ -105,40 +113,40 @@ async function processStickerMessage(ctx) {
         const fileExtension = fileInfo.file_path.split('.').pop();
 
         // Skip processing for animated stickers (which are typically .tgs files)
-        if (fileExtension !== 'tgs') {
+        if (fileExtension !== 'webm') {
             const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
             const response = await axios({ url: fileLink, responseType: 'arraybuffer' });
             const buffer = Buffer.from(response.data, 'binary');
             
-            // Process image: resize and add 80px space
-            const processedBuffer = await sharp(buffer)
-                .metadata()
-                .then(metadata => {
-                    const maxHeight = 512 - 80; // max height
-                    let newHeight = metadata.height;
-                    let newWidth = metadata.width;
+        // Process image: resize (if needed) and add 80px space
+        const processedBuffer = await sharp(buffer)
+            .metadata()
+            .then(metadata => {
+                let newHeight = metadata.height;
+                let newWidth = metadata.width;
+                const maxHeight = 432; // Max height to allow for the 80px space
 
-                    // If adding 80px exceeds 512, resize
-                    if (newHeight > maxHeight) {
-                        const aspectRatio = metadata.width / metadata.height;
-                        newHeight = maxHeight;
-                        newWidth = Math.round(maxHeight * aspectRatio);
-                    }
+                // Check if image exceeds maxHeight or maxWidth while retaining aspect ratio
+                if (newHeight > maxHeight) {
+                    const aspectRatio = metadata.width / metadata.height;
+                    newHeight = maxHeight;
+                    newWidth = Math.round(newHeight * aspectRatio);
+                }
 
-                    return sharp(buffer)
-                        .resize(newWidth, newHeight, {
-                            fit: sharp.fit.inside,
-                            withoutEnlargement: true
-                        })
-                        .extend({
-                            top: 0,
-                            bottom: 80, // add 80 px transparent space to bottom
-                            left: 0,
-                            right: 0,
-                            background: { r: 0, g: 0, b: 0, alpha: 0 }
-                        })
-                        .toBuffer();
-                });
+                return sharp(buffer)
+                    .resize(newWidth, newHeight, {
+                        fit: sharp.fit.inside,
+                        withoutEnlargement: true
+                    })
+                    .extend({
+                        top: 0,
+                        bottom: 80, // Add 80 px transparent space to bottom
+                        left: 0,
+                        right: 0,
+                        background: { r: 0, g: 0, b: 0, alpha: 1 }
+                    })
+                    .toBuffer();
+            });
 
             // Generate filename and save the processed sticker
             const originalFilename = `${timestamp}-${userId}-sticker.${fileExtension}`; // Prepend with timestamp and userId
@@ -149,7 +157,7 @@ async function processStickerMessage(ctx) {
             await ctx.replyWithDocument({ source: fs.createReadStream(savedFilePath), filename: originalFilename });
         } else {
             // For animated stickers, you might want to handle them differently or skip processing
-            ctx.reply('Animated stickers are not supported for custom processing.');
+            ctx.reply('animated sticker support SOOOOOON.');
         }
     } catch (err) {
         console.error(err);
