@@ -104,16 +104,19 @@ async function processStickerMessage(ctx) {
     const fileId = sticker.file_id;
     const userId = ctx.from.id;
     const timestamp = Date.now();
-    // Correctly determine the file extension
-    const fileExt = sticker.is_animated ? 'webm' : 'webp';
-    const originalFilename = `${userId}-${timestamp}-sticker.${fileExt}`;
-    const responseFilename = `resp-${originalFilename}`;
-    const filePath = path.join(tempDir, originalFilename); // Use the 'temp' directory
     const fileLink = await ctx.telegram.getFileLink(fileId);
 
-    console.log(`Downloading sticker: ${fileLink}`);
-    console.log(`Original filename: ${originalFilename}`);
-    console.log(`Response filename: ${responseFilename}`);
+    // Extract file extension from fileLink
+    const fileExtension = fileLink.split('.').pop();
+    
+    // Use the extracted file extension for filenames
+    const originalFilename = `${userId}-${timestamp}-sticker.${fileExtension}`;
+    const responseFilename = `resp-${originalFilename}`;
+    const filePath = path.join(tempDir, originalFilename);
+
+    console.log(`Downloading sticker from: ${fileLink}`);
+    console.log(`File extension: ${fileExtension}`);
+    console.log(`Saving as: ${filePath}`);
 
     try {
         const response = await axios({ url: fileLink, responseType: 'stream' });
@@ -123,19 +126,17 @@ async function processStickerMessage(ctx) {
 
         return new Promise((resolve, reject) => {
             writer.on('finish', () => {
-                console.log(`File saved as: ${filePath}`);
+                console.log(`File saved successfully: ${filePath}`);
                 resolve({ filePath, filename: responseFilename });
             });
             writer.on('error', err => {
-                console.error(`Error saving file: ${err}`);
-                if (fs.existsSync(filePath)) {
-                    fs.unlinkSync(filePath);
-                }
+                console.error(`Error saving the file: ${err}`);
+                ctx.reply('There was an error processing your sticker.');
                 reject(err);
             });
         });
     } catch (err) {
-        console.error(`Error downloading sticker: ${err}`);
+        console.error(`Error downloading the sticker: ${err}`);
         ctx.reply('There was an error processing your sticker.');
         return null;
     }
