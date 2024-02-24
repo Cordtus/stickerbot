@@ -1,11 +1,13 @@
 const axios = require('axios');
 const sharp = require('sharp');
+const os = require('os');
+const tempDir = os.tmpdir();
 const fs = require('fs');
 const path = require('path');
 
 const SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
 
-// This function processes both photos and uncompressed images sent as documents.
+// processes both photos and uncompressed images sent as document
 async function processImage(ctx, fileId) {
     const fileLink = await ctx.telegram.getFileLink(fileId);
 
@@ -18,19 +20,19 @@ async function processImage(ctx, fileId) {
         const metadata = await sharp(buffer).metadata();
 
         // Calculate height plus 80px is <512px
-        const maxHeight = 512 - 80; // Max image height
+        const maxHeight = 512 - 80; // max height
         let newHeight = metadata.height;
         let newWidth = metadata.width;
 
         // If adding 80px exceeds 512, resize
         if (newHeight > maxHeight) {
-            // Calculate new dimensions, maintain aspect ratio
+            // calculate dimensions, maintain aspect ratio
             const aspectRatio = metadata.width / metadata.height;
             newHeight = maxHeight;
             newWidth = Math.round(maxHeight * aspectRatio);
         }
 
-        // Process buffer
+        // process buffer
         return sharp(buffer)
             .resize(newWidth, newHeight, {
                 fit: sharp.fit.inside,
@@ -38,7 +40,7 @@ async function processImage(ctx, fileId) {
             })
             .extend({
                 top: 0,
-                bottom: 80, // Add 80 px transparent space to bottom
+                bottom: 80, // add 80 px transparent space to bottom
                 left: 0,
                 right: 0,
                 background: { r: 0, g: 0, b: 0, alpha: 0 }
@@ -56,7 +58,7 @@ async function processImageContent(ctx) {
     let fileSize;
     let mimeType;
 
-    // Determine if the message contains a photo or a document
+    // determine if message is photo or doc
     if (ctx.message.photo) {
         fileId = ctx.message.photo.pop().file_id;
     } else if (ctx.message.document) {
@@ -68,10 +70,10 @@ async function processImageContent(ctx) {
         return;
     }
 
-    // Fetch file info from Telegram
+    // fetch file info from tg
     const fileInfo = await ctx.telegram.getFile(fileId);
 
-    // Check if the file size exceeds the limit or if the mime type is not an image
+    // check if file size exceeds limit or mime type is not image
     if (fileSize && fileSize > SIZE_LIMIT) {
         ctx.reply('The file size exceeds the 50MB limit. Please send a smaller image.');
         return;
@@ -81,10 +83,10 @@ async function processImageContent(ctx) {
         return;
     }
 
-    // Process the image
+    // process image
     const processedBuffer = await processImage(ctx, fileId);
     if (processedBuffer) {
-        // Send the processed image as a document
+        // send processed image as document
         ctx.replyWithDocument({ source: processedBuffer, filename: 'sticker.png' })
         .catch(err => {
             console.error(err);
@@ -98,21 +100,44 @@ async function processStickerMessage(ctx) {
     const fileId = sticker.file_id;
     const fileLink = await ctx.telegram.getFileLink(fileId);
   
-    // Define the file extension based on whether the sticker is animated
+    // define file extension, animated or static
     const fileExt = sticker.is_animated ? 'webm' : 'png'; 
     const filename = `sticker.${fileExt}`;
-    const filePath = path.join(__dirname, filename);
+    const filePath = path.join(tempDir, filename);
   
     try {
       const response = await axios({ url: fileLink, responseType: 'stream' });
       const writer = fs.createWriteStream(filePath);
-  
+
       response.data.pipe(writer);
   
       return new Promise((resolve, reject) => {
-        writer.on('finish', () => resolve(filePath));
-        writer.on('error', reject);
+        writer.on('finish', () => {
+          // after save, send
+          ctx.replyWithDocument({ source: filePath, filename })
+            .then(() => {
+              // delete after sending
+              fs.unlinkSync(filePath);
+            })
+            .catch(err => {
+              console.error(err);
+              ctx.reply('There was an error sending your sticker.');
+              // delete even if sending fails
+              if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+              }
+            });
+  
+          resolve(filePath);
+        });
+  
+        writer.on('error', (err) => {
+          console.error(err);
+          ctx.reply('There was an error processing your sticker.');
+          reject(err);
+        });
       });
+  
     } catch (err) {
       console.error(err);
       ctx.reply('There was an error processing your sticker.');
