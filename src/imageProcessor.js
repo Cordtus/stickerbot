@@ -100,12 +100,14 @@ async function processStickerMessage(ctx) {
     const fileId = sticker.file_id;
     const fileLink = await ctx.telegram.getFileLink(fileId);
   
-    // define file extension, animated or static
-    const fileExt = sticker.is_animated ? 'webm' : 'png'; 
+    // Define file extension based on whether the sticker is animated or static
+    // Telegram uses .webp for static stickers and .tgs for animated stickers
+    const fileExt = sticker.is_animated ? 'tgs' : 'webp'; 
     const filename = `sticker.${fileExt}`;
     const filePath = path.join(tempDir, filename);
   
     try {
+      // Download the sticker
       const response = await axios({ url: fileLink, responseType: 'stream' });
       const writer = fs.createWriteStream(filePath);
 
@@ -113,36 +115,20 @@ async function processStickerMessage(ctx) {
   
       return new Promise((resolve, reject) => {
         writer.on('finish', () => {
-          // after save, send
-          ctx.replyWithDocument({ source: filePath, filename })
-            .then(() => {
-              // delete after sending
-              fs.unlinkSync(filePath);
-            })
-            .catch(err => {
-              console.error(err);
-              ctx.reply('There was an error sending your sticker.');
-              // delete even if sending fails
-              if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-              }
-            });
-  
-          resolve(filePath);
+          resolve({ filePath, filename }); // Resolve with both filePath and filename
         });
   
-        writer.on('error', (err) => {
+        writer.on('error', err => {
           console.error(err);
           ctx.reply('There was an error processing your sticker.');
-          reject(err);
+          reject(err); // Reject on error
         });
       });
-  
     } catch (err) {
       console.error(err);
       ctx.reply('There was an error processing your sticker.');
       return null;
     }
-  }
-  
+}
+
   module.exports = { processImageContent, processStickerMessage };

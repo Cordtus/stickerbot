@@ -15,19 +15,19 @@ bot.start((ctx) => {
 bot.on('photo', processImageContent);
 bot.on('document', processImageContent);
 bot.on('sticker', async (ctx) => {
-  const { filePath, filename } = await processStickerMessage(ctx); // Assuming processStickerMessage returns an object with filePath and filename
-  if (filePath && filename) {
-    await ctx.replyWithDocument({ source: filePath, filename: filename })
+  const result = await processStickerMessage(ctx);
+  if (result && result.filePath && result.filename) {
+    await ctx.replyWithDocument({ source: result.filePath, filename: result.filename })
       .then(() => {
         // Delete the file after sending it
-        fs.unlinkSync(filePath);
+        fs.unlinkSync(result.filePath);
       })
       .catch(err => {
         console.error(err);
         ctx.reply('There was an error sending your sticker.');
         // Make sure to delete the file even if sending fails
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+        if (fs.existsSync(result.filePath)) {
+          fs.unlinkSync(result.filePath);
         }
       });
   }
