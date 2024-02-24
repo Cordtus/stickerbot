@@ -1,5 +1,7 @@
 const axios = require('axios');
 const sharp = require('sharp');
+const fs = require('fs');
+const path = require('path');
 
 const SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
 
@@ -91,4 +93,31 @@ async function processImageContent(ctx) {
     }
 }
 
-module.exports = { processImageContent };
+async function processStickerMessage(ctx) {
+    const sticker = ctx.message.sticker;
+    const fileId = sticker.file_id;
+    const fileLink = await ctx.telegram.getFileLink(fileId);
+  
+    // Define the file extension based on whether the sticker is animated
+    const fileExt = sticker.is_animated ? '.webm' : '.webp';
+    const filename = `sticker${fileExt}`;
+    const filePath = path.join(__dirname, filename);
+  
+    try {
+      const response = await axios({ url: fileLink, responseType: 'stream' });
+      const writer = fs.createWriteStream(filePath);
+  
+      response.data.pipe(writer);
+  
+      return new Promise((resolve, reject) => {
+        writer.on('finish', () => resolve(filePath));
+        writer.on('error', reject);
+      });
+    } catch (err) {
+      console.error(err);
+      ctx.reply('There was an error processing your sticker.');
+      return null;
+    }
+  }
+  
+  module.exports = { processImageContent, processStickerMessage };

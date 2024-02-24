@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
-const { processImageContent } = require('./imageProcessor');
+const { processImageContent, processStickerMessage } = require('./imageProcessor');
 const { getSession } = require('./sessionManager');
 const { handleMessage } = require('./messageHandlers');
 
@@ -15,13 +15,13 @@ bot.start((ctx) => {
 
 bot.on('photo', processImageContent);
 bot.on('document', processImageContent);
-bot.on('sticker', ctx => {
-  if (ctx.message.sticker.is_animated) {
-    ctx.reply('Currently, animated stickers are not supported. Please send a static image or sticker.');
-  } else {
-    processImageMessage(ctx);
+bot.on('sticker', async (ctx) => {
+  const filePath = await processStickerMessage(ctx);
+  if (filePath) {
+    await ctx.replyWithDocument({ source: filePath });
+    fs.unlinkSync(filePath); // wipe file after send
   }
-}); // Ensure there's only one closing brace and one closing parenthesis here.
+});
 
 bot.launch();
 console.log('Bot is running');
