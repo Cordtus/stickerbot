@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
-const { processImageMessage, processImageFileMessage } = require('./imageProcessor');
+const { processImageContent } = require('./imageProcessor');
 const { getSession } = require('./sessionManager');
 const { handleMessage } = require('./messageHandlers');
 
@@ -13,8 +13,8 @@ bot.start((ctx) => {
   ctx.reply('Welcome! Please send me an image or a static sticker.');
 });
 
-bot.on('photo', processImageMessage);
-bot.on('document', processImageFileMessage);
+bot.on('photo', processImageContent);
+bot.on('document', processImageContent);
 bot.on('sticker', ctx => {
   if (ctx.message.sticker.is_animated) {
     ctx.reply('Currently, animated stickers are not supported. Please send a static image or sticker.');
