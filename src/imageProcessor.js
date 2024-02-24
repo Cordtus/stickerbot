@@ -156,3 +156,5 @@ async function processStickerMessage(ctx) {
         ctx.reply('There was an error processing your sticker.');
     }
 }
+
+module.exports = { processImageContent, processStickerMessage };
