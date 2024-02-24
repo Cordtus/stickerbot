@@ -34,6 +34,5 @@ bot.on('sticker', async (ctx) => {
   }
 });
 
-
 bot.launch();
 console.log('Bot is running');
