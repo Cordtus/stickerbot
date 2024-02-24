@@ -1,11 +1,9 @@
 const axios = require('axios');
 const sharp = require('sharp');
-const os = require('os');
-const tempDir = os.tmpdir();
 const fs = require('fs');
 const path = require('path');
-
 const SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
+
 
 // processes both photos and uncompressed images sent as document
 async function processImage(ctx, fileId) {
@@ -95,15 +93,23 @@ async function processImageContent(ctx) {
     }
 }
 
+// Ensure the 'temp' directory exists
+const tempDir = path.join(__dirname, 'temp');
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
+}
+
 async function processStickerMessage(ctx) {
     const sticker = ctx.message.sticker;
     const fileId = sticker.file_id;
+    const userId = ctx.from.id;
+    const timestamp = Date.now();
+    const fileExt = sticker.is_animated ? 'webm' : 'webp';
+    const originalFilename = `${userId}-${timestamp}-sticker.${fileExt}`;
+    const responseFilename = `resp-${originalFilename}`;
+    const filePath = path.join(tempDir, originalFilename);
+
     const fileLink = await ctx.telegram.getFileLink(fileId);
-    
-    // Since we're focusing on native handling, treat all stickers as .webp for simplicity
-    const fileExt = sticker.is_animated ? 'webm' : 'webp'; // Use 'webm' for animated and 'webp' for static
-    const filename = `sticker.${fileExt}`;
-    const filePath = path.join(tempDir, filename);
 
     try {
       const response = await axios({ url: fileLink, responseType: 'stream' });
@@ -112,11 +118,13 @@ async function processStickerMessage(ctx) {
       response.data.pipe(writer);
 
       return new Promise((resolve, reject) => {
-        writer.on('finish', () => resolve({ filePath, filename }));
+        writer.on('finish', () => resolve({ filePath, filename: responseFilename }));
         writer.on('error', err => {
           console.error(err);
           ctx.reply('There was an error processing your sticker.');
-          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
           reject(err);
         });
       });
@@ -127,4 +135,4 @@ async function processStickerMessage(ctx) {
     }
 }
 
-  module.exports = { processImageContent, processStickerMessage };
+module.exports = { processImageContent, processStickerMessage };
