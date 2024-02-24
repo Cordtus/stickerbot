@@ -99,8 +99,8 @@ async function processStickerMessage(ctx) {
     const fileLink = await ctx.telegram.getFileLink(fileId);
   
     // Define the file extension based on whether the sticker is animated
-    const fileExt = sticker.is_animated ? '.webm' : '.webp';
-    const filename = `sticker${fileExt}`;
+    const fileExt = sticker.is_animated ? 'webm' : 'png'; 
+    const filename = `sticker.${fileExt}`;
     const filePath = path.join(__dirname, filename);
   
     try {

@@ -3,8 +3,6 @@ const fs = require('fs');
 const { Telegraf } = require('telegraf');
 const { processImageContent, processStickerMessage } = require('./imageProcessor');
 const { getSession } = require('./sessionManager');
-const { handleMessage } = require('./messageHandlers');
-
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
@@ -17,10 +15,21 @@ bot.start((ctx) => {
 bot.on('photo', processImageContent);
 bot.on('document', processImageContent);
 bot.on('sticker', async (ctx) => {
-  const filePath = await processStickerMessage(ctx);
-  if (filePath) {
-    await ctx.replyWithDocument({ source: filePath });
-    fs.unlinkSync(filePath); // wipe file after send
+  const { filePath, filename } = await processStickerMessage(ctx); // Assuming processStickerMessage returns an object with filePath and filename
+  if (filePath && filename) {
+    await ctx.replyWithDocument({ source: filePath, filename: filename })
+      .then(() => {
+        // Delete the file after sending it
+        fs.unlinkSync(filePath);
+      })
+      .catch(err => {
+        console.error(err);
+        ctx.reply('There was an error sending your sticker.');
+        // Make sure to delete the file even if sending fails
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      });
   }
 });
 
