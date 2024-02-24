@@ -38,11 +38,12 @@ async function processImage(ctx, fileId) {
             })
             .extend({
                 top: 0,
-                bottom: 80, // add 80 px transparent space to bottom
+                bottom: 80,
                 left: 0,
                 right: 0,
-                background: { r: 0, g: 0, b: 0, alpha: 1 }
+                background: { r: 0, g: 0, b: 0, alpha: 0 }
             })
+            
             .toBuffer();
         } catch (err) {
             if (err.message.includes('unsupported image format')) {
@@ -140,11 +141,12 @@ async function processStickerMessage(ctx) {
                     })
                     .extend({
                         top: 0,
-                        bottom: 80, // Add 80 px transparent space to bottom
+                        bottom: 80,
                         left: 0,
                         right: 0,
-                        background: { r: 0, g: 0, b: 0, alpha: 1 }
+                        background: { r: 0, g: 0, b: 0, alpha: 0 }
                     })
+                    
                     .toBuffer();
             });
 

@@ -12,12 +12,6 @@ bot.start((ctx) => {
 });
 
 
-bot.on('message', (ctx) => {
-  const message = ctx.message;
-  if (message.text && !message.photo && !message.document && !message.sticker) {
-      return;
-  }
-});
 bot.on('photo', processImageContent);
 bot.on('document', processImageContent);
 
@@ -36,6 +30,14 @@ bot.on('sticker', async (ctx) => {
         if (fs.existsSync(result.filePath)) {
           fs.unlinkSync(result.filePath);
         }
+
+bot.on('message', (ctx) => {
+  const message = ctx.message;
+  if (message.text && !message.photo && !message.document && !message.sticker) {
+      return;
+  }
+});
+
       });
   }
   
