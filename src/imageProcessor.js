@@ -1,8 +1,9 @@
 const sharp = require('sharp');
+const axios = require('axios'); // Ensure axios is required
+const path = require('path'); // Ensure path is required
 const { ensureTempDirectory, downloadAndSaveFile, tempDir } = require('./fileHandling');
 const SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
 
-ensureTempDirectory(); // Ensure temp directory is available
 
 // processes both photos and uncompressed images sent as document
 async function processImage(ctx, fileId) {
@@ -94,26 +95,16 @@ async function processImageContent(ctx) {
 }
 
 async function processStickerMessage(ctx) {
-    const { sticker, from } = ctx.message;
-    const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
-    const fileExtension = fileLink.split('.').pop(); // Extract the file extension from the URL
-
-    const userId = from.id;
-    const timestamp = Date.now();
-    const originalFilename = `${userId}-${timestamp}-sticker.${fileExtension}`;
-    const filePath = path.join(tempDir, originalFilename);
-
+    const { sticker } = ctx.message;
     try {
-        await downloadAndSaveFile(fileLink, filePath);
-                resolve(filePath); // No need to resolve with an object if only filePath is used later
-            });
-            writer.on('error', (err) => {
-                console.error(`Error while saving the file: ${err}`);
-                reject(err);
-            });
-        });
+        // Fetch the file link for the sticker
+        const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
+
+        // Send the sticker file as a document back to the user
+        await ctx.replyWithDocument({ url: fileLink, filename: 'sticker.png' });
     } catch (err) {
-        ctx.reply('There was an error processing your sticker.');
+        console.error(err); // Log the error
+        ctx.reply('There was an error sending your sticker.');
     }
 }
 
