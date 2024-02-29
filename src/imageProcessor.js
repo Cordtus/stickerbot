@@ -5,7 +5,7 @@ const fs = require('fs');
 const { ensureTempDirectory, downloadAndSaveFile, tempDir } = require('./fileHandling');
 const SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
 
-// Processes both photos and uncompressed images sent as a document
+// process both photo or uncompressed images sent as document
 async function processImage(ctx, fileId, userId) {
     const fileLink = await ctx.telegram.getFileLink(fileId);
     try {
@@ -16,22 +16,22 @@ async function processImage(ctx, fileId, userId) {
             const originalAspectRatio = metadata.width / metadata.height;
             let newWidth, newHeight;
 
-            // Determine the dimensions to meet the specific requirements
+            // check dimensions
             if (metadata.width >= metadata.height) {
                 newWidth = 512;
                 newHeight = Math.round(newWidth / originalAspectRatio);
             } else {
-                newHeight = 462; // 512 - 50 to account for the transparent space
+                newHeight = 462; // 512 - 50 to account for the transparent buffer
                 newWidth = Math.round(newHeight * originalAspectRatio);
             }
 
-            // Ensure the height does not exceed 432 after adding the transparent space
+            // ensure overall height < 432 including buffer
             if (newHeight > 462) {
                 newHeight = 462;
                 newWidth = Math.round(newHeight * originalAspectRatio);
             }
 
-            // process and resize buffer, then add transparent space
+            // process and resize image, add buffer
             return sharp(buffer)
                 .resize(newWidth, newHeight, {
                     fit: sharp.fit.fill,
@@ -90,15 +90,15 @@ async function processImageContent(ctx) {
         return;
     } else {
     
-                // Process image and rename the file
+                // process and rename image
                 const processedBuffer = await processImage(ctx, fileId, userId);
                 if (processedBuffer) {
                     const timestamp = Date.now();
-                    // Modify filename format to include userId and timestamp while keeping original extension
+                    // filename based on userId with timestamp
                     const fileInfo = await ctx.telegram.getFile(fileId);
                     const fileExtension = path.extname(fileInfo.file_path);
                     const newFilename = `${userId}-${timestamp}${fileExtension}`;
-                    // Send processed image as document with new filename
+                    // send processed image file
                     ctx.replyWithDocument({ source: processedBuffer, filename: newFilename })
                     .catch(err => {
                         console.error('Error sending the processed image:', err);
@@ -108,60 +108,61 @@ async function processImageContent(ctx) {
             }
         }
         
-        async function processStickerMessage(ctx) {
-            const { sticker, from } = ctx.message;
-            const userId = from.id;
-            const timestamp = Date.now();
-        
-            try {
-                const fileInfo = await ctx.telegram.getFile(sticker.file_id);
-                const fileExtension = path.extname(fileInfo.file_path); 
-        
-                if (fileExtension !== '.webm') {
-                    const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
-                    const response = await axios({ url: fileLink, responseType: 'arraybuffer' });
-                    const buffer = Buffer.from(response.data, 'binary');
-        
-                    const processedBuffer = await sharp(buffer)
-                        .metadata()
-                        .then(metadata => {
-                            let newHeight = metadata.height;
-                            let newWidth = metadata.width;
-                            const maxHeight = 462;
-        
-                            if (newHeight > maxHeight) {
-                                const aspectRatio = metadata.width / metadata.height;
-                                newHeight = maxHeight;
-                                newWidth = Math.round(newHeight * aspectRatio);
-                            }
-        
-                            return sharp(buffer)
-                                .resize(newWidth, newHeight, {
-                                    fit: sharp.fit.inside,
-                                    withoutEnlargement: true
-                                })
-                                .extend({
-                                    top: 0,
-                                    bottom: 50,
-                                    left: 0,
-                                    right: 0,
-                                    background: { r: 0, g: 0, b: 0, alpha: 0 }
-                                })
-                                .toBuffer();
-                        });
-        
-                    const originalFilename = `${userId}-${timestamp}${fileExtension}`;
-                    const savedFilePath = path.join(tempDir, originalFilename);
-                    fs.writeFileSync(savedFilePath, processedBuffer);
-        
-                    await ctx.replyWithDocument({ source: fs.createReadStream(savedFilePath), filename: originalFilename });
-                } else {
-                    ctx.reply('Animated sticker support SOOOOOON.');
-                }
-            } catch (err) {
-                console.error('There was an error processing your sticker:', err);
-                ctx.reply('There was an error processing your sticker.');
-            }
+async function processStickerMessage(ctx) {
+    const { sticker, from } = ctx.message;
+    const userId = from.id;
+    const timestamp = Date.now();
+
+    try {
+        const fileInfo = await ctx.telegram.getFile(sticker.file_id);
+        const fileExtension = path.extname(fileInfo.file_path); 
+
+        if (fileExtension !== '.webm') {
+            const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
+            const response = await axios({ url: fileLink, responseType: 'arraybuffer' });
+            const buffer = Buffer.from(response.data, 'binary');
+
+            const processedBuffer = await sharp(buffer)
+                .metadata()
+                .then(metadata => {
+                    let newHeight, newWidth;
+                    if (metadata.width >= metadata.height) {
+                        newWidth = 512;
+                        newHeight = Math.round(newWidth / metadata.width * metadata.height);
+                    } else {
+                        newHeight = 462; // adjusted for 50px bottom space
+                        newWidth = Math.round(newHeight / metadata.height * metadata.width);
+                    }
+
+                    if (newHeight > 462) {
+                        newHeight = 462;
+                        newWidth = Math.round(newHeight / metadata.height * metadata.width);
+                    }
+
+                    return sharp(buffer)
+                        .resize(newWidth, newHeight, { fit: sharp.fit.fill, withoutEnlargement: false })
+                        .extend({
+                            top: 0,
+                            bottom: 50,
+                            left: 0,
+                            right: 0,
+                            background: { r: 0, g: 0, b: 0, alpha: 0 }
+                        })
+                        .toBuffer();
+                });
+
+            const originalFilename = `${userId}-${timestamp}${fileExtension}`;
+            const savedFilePath = path.join(tempDir, originalFilename);
+            fs.writeFileSync(savedFilePath, processedBuffer);
+
+            await ctx.replyWithDocument({ source: fs.createReadStream(savedFilePath), filename: originalFilename });
+        } else {
+            ctx.reply('Animated sticker support SOOOOOON.');
         }
-        
-        module.exports = { processImageContent, processStickerMessage };
+    } catch (err) {
+        console.error('There was an error processing your sticker:', err);
+        ctx.reply('There was an error processing your sticker.');
+    }
+}
+
+module.exports = { processImageContent, processStickerMessage };
