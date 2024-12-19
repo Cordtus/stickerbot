@@ -47,9 +47,9 @@ bot.on('callback_query', async (ctx) => {
     });  
   } else if (action === 'convert_more') {
     if (session.mode === 'icon') {
-      ctx.reply('You are still in Icon Format mode. Please send more images to convert.');
+        ctx.reply('You are still in Icon Format mode. Please send more images to convert.');
     } else if (session.mode === 'sticker') {
-      ctx.reply('You are still in Sticker Format mode. Please send more images to convert.');
+        ctx.reply('You are still in Sticker Format mode. Please send more images to convert.');
     }
   } else {
     ctx.reply('Invalid selection.');
@@ -60,27 +60,28 @@ bot.on(['photo', 'document'], async (ctx) => {
   const session = getSession(ctx.chat.id);
 
   if (!session.mode) {
-    ctx.reply('Please select a mode first using /start.');
-    return;
+      ctx.reply('Please select a mode first using /start.');
+      return;
   }
 
-  // Gather all images or documents from the message
-  const files = ctx.message.photo || [ctx.message.document];
+  // Select the largest photo size or document
+  const files = ctx.message.photo ? [ctx.message.photo.pop()] : [ctx.message.document];
   session.images = files.map(file => ({ fileId: file.file_id, fileName: file.file_name }));
 
   if (session.mode === 'icon') {
-    await processImages(ctx, session.images, { width: 100, height: 100 });
+      await processImages(ctx, session.images, { width: 100, height: 100 });
   } else if (session.mode === 'sticker') {
-    await processImages(ctx, session.images, { width: 512, height: 462, addBuffer: true });
+      await processImages(ctx, session.images, { width: 512, height: 462, addBuffer: true });
   }
 
+  // Options after conversion
   ctx.reply('Conversion completed! What would you like to do next?', {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: 'Start Over', callback_data: 'start_over' }],
-        [{ text: 'Convert More', callback_data: 'convert_more' }]
-      ]
-    }
+      reply_markup: {
+          inline_keyboard: [
+              [{ text: 'Convert More Images', callback_data: 'convert_more' }],
+              [{ text: 'Start Over', callback_data: 'start_over' }]
+          ]
+      }
   });
 });
 
@@ -113,4 +114,5 @@ bot.on('message', (ctx) => {
 });
 
 bot.launch();
+
 console.log('Bot is running');
