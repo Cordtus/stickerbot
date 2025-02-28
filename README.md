@@ -1,6 +1,6 @@
 # Telegram Sticker Bot
 
-Bot to process images into Telegram-compatible sticker formats or emotes.
+Bot to process images into Telegram-compatible sticker formats or emotes, with persistent sticker pack management.
 
 ---
 
@@ -11,6 +11,12 @@ Bot to process images into Telegram-compatible sticker formats or emotes.
 - Handles both single and multiple image uploads in a single message.
 - Processes existing Telegram stickers by adding a 50px transparent buffer.
 - Outputs processed images in `.webp` format and sends them back as documents to avoid compression.
+- **Persistent sticker pack management**:
+  - Create new sticker packs
+  - Add stickers to existing packs
+  - Add external packs to your collection
+  - Mark packs as favorites
+  - Manage your pack collection
 - Manages temporary files and cleans up automatically.
 
 ---
@@ -19,6 +25,7 @@ Bot to process images into Telegram-compatible sticker formats or emotes.
 
 - **Node.js** v14 or later
 - Telegram Bot Token (obtainable via [BotFather](https://core.telegram.org/bots#botfather))
+- SQLite3
 
 ---
 
@@ -60,12 +67,29 @@ Bot to process images into Telegram-compatible sticker formats or emotes.
 ## Usage
 
 1. Start the bot on Telegram using the `/start` command.
-2. Select a conversion mode:
+2. Select a mode:
     - **Icon Format**: Converts images to 100x100 for emotes.
     - **Sticker Format**: Converts images to 512x512 (or smaller) with a 50px transparent buffer.
-3. Send one or more images to the bot for conversion.
-4. Receive processed images as `.webp` documents.
-5. After processing, choose to **Start Over** or **Convert More** in the current mode.
+    - **Manage Sticker Packs**: Create and manage your sticker collections.
+3. For image conversion, send one or more images to the bot.
+4. For sticker pack management, you can:
+    - Create a new pack and add stickers
+    - Add stickers to your existing packs
+    - Add external packs to your collection
+    - View and manage your collection
+
+---
+
+## Database Schema
+
+The bot uses SQLite to store persistent data about user sticker packs:
+
+- **users**: Stores user information
+- **sticker_packs**: Stores sticker pack details
+- **stickers**: Stores information about individual stickers
+- **user_packs**: Manages the relationship between users and packs
+
+The database file is stored in the `src/data/` directory.
 
 ---
 
@@ -80,8 +104,12 @@ Bot to process images into Telegram-compatible sticker formats or emotes.
 
 - Temporary files are stored in the `temp/` directory and automatically purged after 6 hours of inactivity.
 
+- Sticker pack data is persisted in a SQLite database.
+
 - Modular structure:
   - `bot.js`: Core bot functionality.
+  - `databaseManager.js`: Handles database operations.
+  - `stickerManager.js`: Manages sticker pack operations.
   - `imageProcessor.js`: Handles image processing.
   - `fileHandling.js`: Manages temporary files.
   - `sessionManager.js`: Tracks user sessions and modes.

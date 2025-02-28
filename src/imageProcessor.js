@@ -58,11 +58,14 @@ async function processImage(ctx, fileId, options) {
 
         let sharpInstance = sharp(buffer);
         
-        // Only resize if dimensions are specified
+        // Always force resize in icon mode, regardless of file type
         if (options.width && options.height) {
-            sharpInstance = sharpInstance.resize(options.width, options.height, {
+            console.log(`Resizing to ${options.width}x${options.height}, forceResize=${options.forceResize === true}`);
+            sharpInstance = sharpInstance.resize({
+                width: options.width,
+                height: options.height,
                 fit: sharp.fit.cover,
-                withoutEnlargement: options.forceResize ?? false,
+                withoutEnlargement: false  // Always resize even if smaller
             });
         }
 
@@ -76,7 +79,11 @@ async function processImage(ctx, fileId, options) {
             });
         }
 
-        return await sharpInstance.webp().toBuffer();
+        // Ensure we always convert to webp with proper settings
+        return await sharpInstance.webp({
+            quality: 100,
+            lossless: true
+        }).toBuffer();
     } catch (err) {
         console.error(`Error processing image (${fileId}): ${err.message}`);
         throw new Error(`Image processing failed for file ID: ${fileId}. Error: ${err.message}`);

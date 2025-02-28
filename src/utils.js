@@ -54,10 +54,38 @@ function isImageFile(filename) {
   return imageExtensions.includes(ext);
 }
 
+/**
+ * Extract sticker set name from Telegram link or text
+ * @param {string} input - Input text (URL or pack name)
+ * @returns {string|null} - Extracted sticker set name or null if invalid
+ */
+function extractStickerSetName(input) {
+  if (!input) return null;
+  
+  // Clean up the input
+  const trimmed = input.trim();
+  
+  // Direct pack name
+  if (isValidStickerSetName(trimmed)) {
+    return trimmed;
+  }
+  
+  // Handle URLs like https://t.me/addstickers/packname
+  const urlRegex = /(?:https?:\/\/)?(?:t(?:elegram)?\.(?:me|dog)\/addstickers\/([a-z0-9_]+))/i;
+  const match = trimmed.match(urlRegex);
+  
+  if (match && match[1]) {
+    return match[1];
+  }
+  
+  return null;
+}
+
 export {
   isValidStickerSetName,
   sanitizeStickerSetName,
   formatDate,
   generateRandomId,
-  isImageFile
+  isImageFile,
+  extractStickerSetName
 };
