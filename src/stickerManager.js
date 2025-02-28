@@ -71,16 +71,15 @@ async function createStickerSet(ctx, name, title, firstStickerPath = null, first
       // Call Telegram API to create sticker set with first sticker
       try {
         logWithContext('createStickerSet', `Calling Telegram API to create sticker set with first sticker`);
-        const result = await ctx.telegram.createNewStickerSet(
-          userId,
-          name,
-          title,
-          {
-            source: stickerFile,
-            filename: `sticker.webp`
-          },
-          firstStickerEmoji
-        );
+        
+        // Use the direct method instead of createNewStickerSet which may be having issues
+        const result = await ctx.telegram.callApi('createNewStickerSet', {
+          user_id: userId,
+          name: name,
+          title: title,
+          emojis: firstStickerEmoji,
+          png_sticker: { source: stickerFile, filename: 'sticker.webp' }
+        });
         
         // Save to our database
         logWithContext('createStickerSet', `Sticker set created on Telegram, saving to database`);
@@ -151,15 +150,14 @@ async function addStickerToSet(ctx, setName, stickerPath, emoji = '😊') {
     // Call Telegram API to add sticker to set
     try {
       logWithContext('addStickerToSet', `Calling Telegram API to add sticker to set`);
-      const result = await ctx.telegram.addStickerToSet(
-        userId,
-        setName,
-        {
-          source: stickerFile,
-          filename: `sticker.webp`
-        },
-        emoji
-      );
+      
+      // Use direct API call instead of the wrapper
+      const result = await ctx.telegram.callApi('addStickerToSet', {
+        user_id: userId,
+        name: setName,
+        emojis: emoji,
+        png_sticker: { source: stickerFile, filename: 'sticker.webp' }
+      });
       
       // Get the sticker's file_id from Telegram's response if possible
       try {

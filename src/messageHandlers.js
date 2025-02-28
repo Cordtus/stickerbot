@@ -21,6 +21,16 @@ import {
 import { extractStickerSetName } from './utils.js';
 import { ensureTempDirectory, tempDir } from './fileHandler.js';
 
+// Enhanced logger that provides context
+function logWithContext(context, message, error = null) {
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [${context}] ${message}`);
+    if (error) {
+        console.error(`[${timestamp}] [${context}] ERROR: ${error.message}`);
+        console.error(error.stack);
+    }
+}
+
 // Handle photos and documents
 async function handlePhotoDocument(ctx) {
     const session = getSession(ctx.chat.id);
