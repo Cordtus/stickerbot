@@ -60,29 +60,45 @@ bot.on(['photo', 'document'], async (ctx) => {
   const session = getSession(ctx.chat.id);
 
   if (!session.mode) {
-      ctx.reply('Please select a mode first using /start.');
+      await ctx.reply('Please select a mode first using /start.');
       return;
   }
 
-  // Select the largest photo size or document
-  const files = ctx.message.photo ? [ctx.message.photo.pop()] : [ctx.message.document];
-  session.images = files.map(file => ({ fileId: file.file_id, fileName: file.file_name }));
+  const files = ctx.message.photo 
+      ? [{ fileId: ctx.message.photo[ctx.message.photo.length - 1]?.file_id, fileSize: ctx.message.photo[ctx.message.photo.length - 1]?.file_size }]
+      : ctx.message.document 
+          ? [{ fileId: ctx.message.document.file_id, fileName: ctx.message.document.file_name }]
+          : [];
 
-  if (session.mode === 'icon') {
-      await processImages(ctx, session.images, { width: 100, height: 100 });
-  } else if (session.mode === 'sticker') {
-      await processImages(ctx, session.images, { width: 512, height: 462, addBuffer: true });
+  if (!files.length) {
+      await ctx.reply('No valid file was found in your message. Please send an image or document.');
+      return;
   }
 
-  // Options after conversion
-  ctx.reply('Conversion completed! What would you like to do next?', {
-      reply_markup: {
-          inline_keyboard: [
-              [{ text: 'Convert More Images', callback_data: 'convert_more' }],
-              [{ text: 'Start Over', callback_data: 'start_over' }]
-          ]
+  session.images = files;
+
+  try {
+      const results = await processImages(ctx, session.images, 
+          session.mode === 'icon' 
+              ? { width: 100, height: 100 } 
+              : { width: 512, height: 462, addBuffer: true }
+      );
+
+      if (results.success.length > 0) {
+          await ctx.reply(`${results.success.length} file(s) processed successfully!`);
       }
-  });
+
+      if (results.failures.length > 0) {
+          await ctx.reply(`${results.failures.length} file(s) failed to process. Please try again.`);
+      }
+
+      if (results.skipped.length > 0) {
+          await ctx.reply(`${results.skipped.length} thumbnail(s) were skipped.`);
+      }
+  } catch (err) {
+      console.error('Error during image processing:', err.message);
+      await ctx.reply('An unexpected error occurred while processing your files.');
+  }
 });
 
 bot.on('sticker', async (ctx) => {
@@ -90,19 +106,29 @@ bot.on('sticker', async (ctx) => {
   session.lastAction = null;
 
   try {
-    const result = await processStickerMessage(ctx);
+      const result = await processStickerMessage(ctx);
 
-    if (result && result.filePath && result.filename) {
-      await ctx.replyWithDocument({ source: result.filePath, filename: result.filename });
+      if (result.success) {
+          await ctx.replyWithDocument({ source: result.filePath, filename: result.filename });
 
-      // Delete the temporary file after sending
-      fs.unlinkSync(result.filePath);
-    } else {
-      ctx.reply('There was an error processing your sticker.');
-    }
+          // Cleanup temporary file
+          if (fs.existsSync(result.filePath)) {
+              fs.unlinkSync(result.filePath);
+          }
+
+          await ctx.reply('Sticker processed successfully! What would you like to do next?', {
+              reply_markup: {
+                  inline_keyboard: [
+                      [{ text: 'Return to Main Menu', callback_data: 'start_over' }]
+                  ],
+              },
+          });
+      } else {
+          throw new Error(result.error || 'Sticker processing failed due to unknown reasons.');
+      }
   } catch (err) {
-    console.error('Error processing sticker:', err);
-    ctx.reply('An error occurred while processing your sticker.');
+      console.error('Error processing sticker:', err.message);
+      await ctx.reply('An error occurred while processing your sticker. Please try again.');
   }
 });
 
