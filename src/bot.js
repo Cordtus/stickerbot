@@ -2,9 +2,6 @@
 
 import { Telegraf } from 'telegraf';
 import dotenv from 'dotenv';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
 
 // Import modules
 import { handleCallback } from './callbackHandlers.js';
@@ -20,26 +17,12 @@ import {
     handleStatus
 } from './commandHandlers.js';
 import { initDatabase } from './databaseManager.js';
+import { logWithContext } from './logger.js';
+import { cleanupOldFiles } from './fileHandler.js';
+import { tempDir } from './utils.js';
 
 // Load environment variables
 dotenv.config();
-
-// Enhanced logger
-function logWithContext(context, message, error = null) {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [${context}] ${message}`);
-    if (error) {
-        console.error(`[${timestamp}] [${context}] ERROR: ${error.message}`);
-        console.error(error.stack);
-    }
-}
-
-// Ensure data directory exists
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-}
 
 // Initialize bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -49,6 +32,18 @@ initDatabase().catch(err => {
     logWithContext('bot', 'Failed to initialize database', err);
     process.exit(1);
 });
+
+// Schedule temp file cleanup to run every hour
+const CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
+const MAX_FILE_AGE = 6; // hours
+
+setInterval(() => {
+    logWithContext('bot', 'Running scheduled temp file cleanup');
+    cleanupOldFiles(tempDir, MAX_FILE_AGE);
+}, CLEANUP_INTERVAL);
+
+// Run initial cleanup at startup
+cleanupOldFiles(tempDir, MAX_FILE_AGE);
 
 // Register command handlers
 bot.start(handleStart);

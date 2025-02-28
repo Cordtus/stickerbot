@@ -2,30 +2,23 @@
 
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { logWithContext } from './logger.js';
+import { getDataPath, ensureDirectory, generateRandomId } from './utils.js';
 
-// Get the directory name correctly in ES module
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = path.join(__dirname, 'data', 'stickerpacks.db');
-
-// Ensure data directory exists
-import fs from 'fs';
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
+// Define the database path
+const dbPath = getDataPath('stickerpacks.db');
 
 // Database connection
 let db = null;
 
 /**
  * Initialize the database
+ * @returns {Promise<object>} Database connection object
  */
 async function initDatabase() {
   if (db) return db;
   
-  console.log(`Initializing database at ${dbPath}`);
+  logWithContext('databaseManager', `Initializing database at ${dbPath}`);
   
   try {
     // Open database connection
@@ -48,7 +41,7 @@ async function initDatabase() {
       );
       
       CREATE TABLE IF NOT EXISTS sticker_packs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         title TEXT NOT NULL,
         owner_id INTEGER NOT NULL,
@@ -60,18 +53,19 @@ async function initDatabase() {
       );
       
       CREATE TABLE IF NOT EXISTS stickers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        pack_id INTEGER NOT NULL,
+        id TEXT PRIMARY KEY,
+        pack_id TEXT NOT NULL,
         file_id TEXT,
         emoji TEXT DEFAULT '😊',
         position INTEGER,
+        type TEXT DEFAULT 'static', /* 'static', 'animated', 'video' */
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (pack_id) REFERENCES sticker_packs(id) ON DELETE CASCADE
       );
       
       CREATE TABLE IF NOT EXISTS user_packs (
         user_id INTEGER NOT NULL,
-        pack_id INTEGER NOT NULL,
+        pack_id TEXT NOT NULL,
         can_edit BOOLEAN DEFAULT 0,
         is_favorite BOOLEAN DEFAULT 0,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -81,26 +75,101 @@ async function initDatabase() {
       );
     `);
     
-    console.log('Database initialized successfully');
+    // Check and add new column to stickers table if it doesn't exist
+    const columns = await db.all("PRAGMA table_info(stickers)");
+    if (!columns.some(col => col.name === 'type')) {
+      logWithContext('databaseManager', 'Adding type column to stickers table');
+      await db.exec('ALTER TABLE stickers ADD COLUMN type TEXT DEFAULT "static"');
+    }
+    
+    logWithContext('databaseManager', 'Database initialized successfully');
     return db;
   } catch (err) {
-    console.error('Database initialization error:', err);
+    logWithContext('databaseManager', 'Database initialization error', err);
+    throw err;
+  }
+}
+
+/**
+ * Execute a database operation within a transaction
+ * @param {Function} operation - Async function that performs database operations
+ * @param {string} context - Context identifier for logging
+ * @returns {Promise<any>} The result of the operation
+ */
+async function withTransaction(operation, context = 'dbTransaction') {
+  const db = await initDatabase();
+  let result = null;
+  
+  try {
+    logWithContext(context, `Starting transaction`);
+    await db.exec('BEGIN TRANSACTION');
+    
+    result = await operation(db);
+    
+    logWithContext(context, `Committing transaction`);
+    await db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    logWithContext(context, `Transaction failed, rolling back`, err);
+    try {
+      await db.exec('ROLLBACK');
+    } catch (rollbackErr) {
+      logWithContext(context, `Rollback failed`, rollbackErr);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Batch database operations for better performance
+ * @param {Array} items - Array of items to process 
+ * @param {Function} operation - Function that returns a SQL operation for each item
+ * @param {string} context - Context identifier for logging
+ * @returns {Promise<Array>} Array of results
+ */
+async function batchOperation(items, operation, context = 'dbTransaction') {
+  if (!items || items.length === 0) return [];
+  
+  const db = await initDatabase();
+  const results = [];
+  
+  try {
+    logWithContext(context, `Starting batch operation for ${items.length} items`);
+    await db.exec('BEGIN TRANSACTION');
+    
+    for (const item of items) {
+      const { sql, params } = operation(item);
+      const result = await db.run(sql, params);
+      results.push(result);
+    }
+    
+    logWithContext(context, `Committing batch operation`);
+    await db.exec('COMMIT');
+    return results;
+  } catch (err) {
+    logWithContext(context, `Batch operation failed, rolling back`, err);
+    try {
+      await db.exec('ROLLBACK');
+    } catch (rollbackErr) {
+      logWithContext(context, `Rollback failed`, rollbackErr);
+    }
     throw err;
   }
 }
 
 /**
  * Get or create user in the database
+ * @param {object} ctx - Telegram context
+ * @returns {Promise<object>} User object
  */
 async function getOrCreateUser(ctx) {
-  const db = await initDatabase();
   const user = ctx.from;
   
   if (!user) {
     throw new Error('User information not available');
   }
   
-  try {
+  return withTransaction(async (db) => {
     // Try to get existing user
     const existingUser = await db.get('SELECT * FROM users WHERE user_id = ?', user.id);
     
@@ -114,20 +183,21 @@ async function getOrCreateUser(ctx) {
       [user.id, user.username, user.first_name, user.last_name]
     );
     
+    logWithContext('databaseManager', `Created new user ${user.id} (${user.username || 'no username'})`);
     return await db.get('SELECT * FROM users WHERE user_id = ?', user.id);
-  } catch (err) {
-    console.error('Error getting or creating user:', err);
-    throw err;
-  }
+  }, 'databaseManager');
 }
 
 /**
  * Add a sticker pack to the database
+ * @param {number} userId - User ID of the owner
+ * @param {string} packName - Unique sticker pack name
+ * @param {string} packTitle - User-friendly title for the pack
+ * @param {boolean} canEdit - Whether the user can edit this pack
+ * @returns {Promise<string>} - ID of the sticker pack
  */
 async function addStickerPack(userId, packName, packTitle, canEdit = true) {
-  const db = await initDatabase();
-  
-  try {
+  return withTransaction(async (db) => {
     // Check if user exists, if not create them
     const user = await db.get('SELECT * FROM users WHERE user_id = ?', userId);
     if (!user) {
@@ -154,13 +224,14 @@ async function addStickerPack(userId, packName, packTitle, canEdit = true) {
       return existingPack.id;
     }
     
-    // Create new pack
-    const result = await db.run(
-      'INSERT INTO sticker_packs (name, title, owner_id) VALUES (?, ?, ?)',
-      [packName, packTitle, userId]
-    );
+    // Generate non-sequential ID
+    const packId = generateRandomId('pack_');
     
-    const packId = result.lastID;
+    // Create new pack
+    await db.run(
+      'INSERT INTO sticker_packs (id, name, title, owner_id) VALUES (?, ?, ?, ?)',
+      [packId, packName, packTitle, userId]
+    );
     
     // Create user-pack relationship
     await db.run(
@@ -168,15 +239,15 @@ async function addStickerPack(userId, packName, packTitle, canEdit = true) {
       [userId, packId, canEdit ? 1 : 0]
     );
     
+    logWithContext('databaseManager', `Created new sticker pack '${packTitle}' with ID ${packId}`);
     return packId;
-  } catch (err) {
-    console.error('Error adding sticker pack:', err);
-    throw err;
-  }
+  }, 'databaseManager');
 }
 
 /**
  * Get user's sticker packs
+ * @param {number} userId - User ID
+ * @returns {Promise<Array>} List of sticker packs
  */
 async function getUserStickerPacks(userId) {
   const db = await initDatabase();
@@ -190,13 +261,15 @@ async function getUserStickerPacks(userId) {
       ORDER BY up.is_favorite DESC, p.last_modified DESC
     `, userId);
   } catch (err) {
-    console.error('Error getting user sticker packs:', err);
+    logWithContext('databaseManager', 'Error getting user sticker packs', err);
     return [];
   }
 }
 
 /**
  * Get sticker pack by name
+ * @param {string} packName - Sticker pack name
+ * @returns {Promise<object|null>} Sticker pack or null if not found
  */
 async function getStickerPackByName(packName) {
   const db = await initDatabase();
@@ -204,13 +277,16 @@ async function getStickerPackByName(packName) {
   try {
     return await db.get('SELECT * FROM sticker_packs WHERE name = ?', packName);
   } catch (err) {
-    console.error('Error getting sticker pack:', err);
+    logWithContext('databaseManager', 'Error getting sticker pack', err);
     return null;
   }
 }
 
 /**
  * Check if user can edit a sticker pack
+ * @param {number} userId - User ID
+ * @param {string} packName - Sticker pack name
+ * @returns {Promise<boolean>} Whether user can edit pack
  */
 async function canUserEditPack(userId, packName) {
   const db = await initDatabase();
@@ -226,13 +302,17 @@ async function canUserEditPack(userId, packName) {
     
     return userPack?.can_edit === 1 || pack.owner_id === userId;
   } catch (err) {
-    console.error('Error checking if user can edit pack:', err);
+    logWithContext('databaseManager', 'Error checking if user can edit pack', err);
     return false;
   }
 }
 
 /**
  * Add external sticker pack to user's collection
+ * @param {number} userId - User ID
+ * @param {string} packName - Sticker pack name
+ * @param {string} packTitle - Sticker pack title (or name if not provided)
+ * @returns {Promise<string>} Pack ID
  */
 async function addExternalStickerPack(userId, packName, packTitle) {
   return await addStickerPack(userId, packName, packTitle || packName, false);
@@ -240,14 +320,21 @@ async function addExternalStickerPack(userId, packName, packTitle) {
 
 /**
  * Add sticker to database
+ * @param {string} packId - ID of the sticker pack
+ * @param {string} fileId - Telegram file ID for the sticker
+ * @param {string} emoji - Emoji associated with the sticker
+ * @param {number} position - Position in the sticker pack
+ * @param {string} type - Sticker type ('static', 'animated', or 'video')
+ * @returns {Promise<string>} - ID of the new sticker
  */
-async function addStickerToDatabase(packId, fileId, emoji = '😊', position = 0) {
-  const db = await initDatabase();
-  
-  try {
-    const result = await db.run(
-      'INSERT INTO stickers (pack_id, file_id, emoji, position) VALUES (?, ?, ?, ?)',
-      [packId, fileId, emoji, position]
+async function addStickerToDatabase(packId, fileId, emoji = '😊', position = 0, type = 'static') {
+  return withTransaction(async (db) => {
+    // Generate non-sequential ID
+    const stickerId = generateRandomId('sticker_');
+    
+    await db.run(
+      'INSERT INTO stickers (id, pack_id, file_id, emoji, position, type) VALUES (?, ?, ?, ?, ?, ?)',
+      [stickerId, packId, fileId, emoji, position, type]
     );
     
     // Update last modified timestamp
@@ -256,15 +343,15 @@ async function addStickerToDatabase(packId, fileId, emoji = '😊', position = 0
       packId
     );
     
-    return result.lastID;
-  } catch (err) {
-    console.error('Error adding sticker to database:', err);
-    throw err;
-  }
+    logWithContext('databaseManager', `Added ${type} sticker to pack ${packId} at position ${position}`);
+    return stickerId;
+  }, 'databaseManager');
 }
 
 /**
  * Get stickers in a pack
+ * @param {string} packId - Sticker pack ID
+ * @returns {Promise<Array>} List of stickers
  */
 async function getStickersInPack(packId) {
   const db = await initDatabase();
@@ -276,18 +363,19 @@ async function getStickersInPack(packId) {
       ORDER BY position
     `, packId);
   } catch (err) {
-    console.error('Error getting stickers in pack:', err);
+    logWithContext('databaseManager', 'Error getting stickers in pack', err);
     return [];
   }
 }
 
 /**
  * Toggle favorite status of a pack
+ * @param {number} userId - User ID
+ * @param {string} packId - Sticker pack ID
+ * @returns {Promise<boolean>} New favorite status
  */
 async function toggleFavoritePack(userId, packId) {
-  const db = await initDatabase();
-  
-  try {
+  return withTransaction(async (db) => {
     const userPack = await db.get(
       'SELECT * FROM user_packs WHERE user_id = ? AND pack_id = ?',
       [userId, packId]
@@ -304,20 +392,19 @@ async function toggleFavoritePack(userId, packId) {
       [newFavoriteStatus, userId, packId]
     );
     
+    logWithContext('databaseManager', `User ${userId} ${newFavoriteStatus ? 'favorited' : 'unfavorited'} pack ${packId}`);
     return newFavoriteStatus === 1;
-  } catch (err) {
-    console.error('Error toggling favorite pack:', err);
-    throw err;
-  }
+  }, 'databaseManager');
 }
 
 /**
  * Remove user's access to a pack
+ * @param {number} userId - User ID
+ * @param {string} packId - Sticker pack ID
+ * @returns {Promise<boolean>} Success status
  */
 async function removeUserPack(userId, packId) {
-  const db = await initDatabase();
-  
-  try {
+  return withTransaction(async (db) => {
     await db.run(
       'DELETE FROM user_packs WHERE user_id = ? AND pack_id = ?',
       [userId, packId]
@@ -334,18 +421,18 @@ async function removeUserPack(userId, packId) {
       
       if (!pack || pack.owner_id === userId) {
         await db.run('DELETE FROM sticker_packs WHERE id = ?', packId);
+        logWithContext('databaseManager', `Deleted sticker pack ${packId}`);
       }
     }
     
+    logWithContext('databaseManager', `Removed user ${userId} from pack ${packId}`);
     return true;
-  } catch (err) {
-    console.error('Error removing user pack:', err);
-    throw err;
-  }
+  }, 'databaseManager');
 }
 
 /**
  * Get pack stats
+ * @returns {Promise<object>} Statistics about packs, stickers, and users
  */
 async function getPackStats() {
   const db = await initDatabase();
@@ -359,7 +446,7 @@ async function getPackStats() {
     
     return stats;
   } catch (err) {
-    console.error('Error getting pack stats:', err);
+    logWithContext('databaseManager', 'Error getting pack stats', err);
     return {
       totalPacks: 0,
       totalStickers: 0,
@@ -368,8 +455,11 @@ async function getPackStats() {
   }
 }
 
+// Export all database functions
 export {
   initDatabase,
+  withTransaction,
+  batchOperation,
   getOrCreateUser,
   addStickerPack,
   getUserStickerPacks,

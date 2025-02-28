@@ -1,16 +1,7 @@
 // commandHandlers.js
 
 import { getSession } from './sessionManager.js';
-
-// Enhanced logger
-function logWithContext(context, message, error = null) {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [${context}] ${message}`);
-    if (error) {
-        console.error(`[${timestamp}] [${context}] ERROR: ${error.message}`);
-        console.error(error.stack);
-    }
-}
+import { logWithContext } from './logger.js';
 
 // Handle /start command
 function handleStart(ctx) {

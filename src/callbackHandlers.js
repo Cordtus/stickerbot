@@ -306,6 +306,9 @@ async function handlePackCallbacks(ctx) {
 // Main callback handler
 async function handleCallback(ctx) {
     try {
+        // Answer callback query immediately to prevent Telegram from showing loading indicator
+        await ctx.answerCallbackQuery();
+        
         // Try each handler in sequence
         const handlers = [
             handleModeSelection,
@@ -324,6 +327,16 @@ async function handleCallback(ctx) {
         ctx.reply('Invalid selection.');
     } catch (error) {
         console.error('Error handling callback:', error);
+        // Still answer the callback query on error
+        try {
+            await ctx.answerCallbackQuery({
+                text: 'An error occurred',
+                show_alert: true
+            });
+        } catch (cbError) {
+            // In case the callback query is too old or already answered
+            console.error('Failed to answer callback query:', cbError.message);
+        }
         ctx.reply(`Error: ${error.message}`);
     }
 }

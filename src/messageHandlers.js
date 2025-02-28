@@ -1,7 +1,6 @@
 // messageHandlers.js
 
 import fs from 'fs';
-import path from 'path';
 import axios from 'axios';
 import sharp from 'sharp';
 import { getSession } from './sessionManager.js';
@@ -16,20 +15,13 @@ import {
     createStickerSet, 
     generateStickerSetName,
     addExternalStickerPack,
-    canUserEditPack
+    canUserEditPack,
+    getStickerType
 } from './stickerManager.js';
-import { extractStickerSetName } from './utils.js';
-import { ensureTempDirectory, tempDir } from './fileHandler.js';
-
-// Enhanced logger that provides context
-function logWithContext(context, message, error = null) {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [${context}] ${message}`);
-    if (error) {
-        console.error(`[${timestamp}] [${context}] ERROR: ${error.message}`);
-        console.error(error.stack);
-    }
-}
+import { tempDir, getTempPath, extractStickerSetName, generateUniqueFilename } from './utils.js';
+import { logWithContext } from './logger.js';
+import { safeDeleteFile, createTempFileFromBuffer } from './fileHandler.js';
+import { processAnimatedSticker } from './animationProcessor.js';
 
 // Handle photos and documents
 async function handlePhotoDocument(ctx) {
@@ -72,7 +64,7 @@ async function handlePhotoDocument(ctx) {
                 responseType: 'arraybuffer'
             });
             
-            const buffer = Buffer.from(response.data, 'binary');
+            const buffer = Buffer.from(response.data);
             
             // Force resize to 100x100 for icon mode
             const processedBuffer = await sharp(buffer)
@@ -84,10 +76,9 @@ async function handlePhotoDocument(ctx) {
                 .toBuffer();
                 
             // Save and send
-            ensureTempDirectory();
             const userId = ctx.from.id;
-            const filename = `icon-${userId}-${Date.now()}.webp`;
-            const filePath = path.join(tempDir, filename);
+            const filename = generateUniqueFilename('icon', 'webp', userId);
+            const filePath = getTempPath(filename);
             
             fs.writeFileSync(filePath, processedBuffer);
             
@@ -97,9 +88,7 @@ async function handlePhotoDocument(ctx) {
             });
             
             // Clean up
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
+            safeDeleteFile(filePath, 'handlePhotoDocument');
             
             await ctx.reply('WebP processing complete!', {
                 reply_markup: {
@@ -171,11 +160,13 @@ async function handleSticker(ctx) {
     const session = getSession(ctx.chat.id);
     logWithContext('handleSticker', `Started with mode=${session.mode}, step=${session.packCreationStep}`);
 
-    // Check if this is an animated sticker - do this check early
-    if (ctx.message.sticker.is_animated) {
-        await ctx.reply('Animated stickers (.tgs files) are not supported. Please send a static sticker or image instead.');
-        return;
-    }
+    // Get sticker type 
+    const sticker = ctx.message.sticker;
+    const isAnimated = sticker.is_animated;
+    const isVideo = sticker.is_video;
+    const stickerType = isAnimated ? 'animated' : (isVideo ? 'video' : 'static');
+    
+    logWithContext('handleSticker', `Sticker type: ${stickerType}`);
 
     // PRIORITY #1: Check if we're in sticker pack creation or editing mode
     if (session.mode === 'packs' && 
@@ -241,6 +232,18 @@ async function handleSticker(ctx) {
         }
     }
     
+    // Handle animated/video stickers
+    if (isAnimated || isVideo) {
+        return ctx.reply(`This is a ${isAnimated ? 'animated' : 'video'} sticker. Currently, the converter only supports static stickers.
+The bot can still be used to manage packs containing animated and video stickers.`, {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: 'Return to Main Menu', callback_data: 'start_over' }]
+                ]
+            }
+        });
+    }
+    
     try {
         // PRIORITY #3: Check if we're in icon mode - special handling
         if (session.mode === 'icon') {
@@ -257,7 +260,7 @@ async function handleSticker(ctx) {
                 responseType: 'arraybuffer'
             });
             
-            const buffer = Buffer.from(response.data, 'binary');
+            const buffer = Buffer.from(response.data);
             
             // Force resize to 100x100 for icon mode
             const processedBuffer = await sharp(buffer)
@@ -269,10 +272,9 @@ async function handleSticker(ctx) {
                 .toBuffer();
                 
             // Save and send
-            ensureTempDirectory();
             const userId = ctx.from.id;
-            const filename = `icon-${userId}-${Date.now()}.webp`;
-            const filePath = path.join(tempDir, filename);
+            const filename = generateUniqueFilename('icon', 'webp', userId);
+            const filePath = getTempPath(filename);
             
             fs.writeFileSync(filePath, processedBuffer);
             
@@ -282,9 +284,7 @@ async function handleSticker(ctx) {
             });
             
             // Clean up
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
+            safeDeleteFile(filePath, 'handleSticker');
             
             await ctx.reply('Sticker resized to Icon Format!', {
                 reply_markup: {
@@ -309,9 +309,7 @@ async function handleSticker(ctx) {
             });
 
             // Cleanup temporary file
-            if (fs.existsSync(result.filePath)) {
-                fs.unlinkSync(result.filePath);
-            }
+            safeDeleteFile(result.filePath, 'handleSticker');
 
             await ctx.reply('Sticker processed successfully! What would you like to do next?', {
                 reply_markup: {
@@ -343,37 +341,57 @@ async function handleStickerForPack(ctx) {
     try {
         await ctx.reply('Processing sticker for your pack...');
         
-        let fileId;
+        let fileId, stickerType = 'static';
+        
+        // Extract file ID and determine type
         if (ctx.message.photo && ctx.message.photo.length > 0) {
             fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
         } else if (ctx.message.document) {
             fileId = ctx.message.document.file_id;
-        } else if (ctx.message.sticker) {
-            // Check if this is an animated sticker
-            if (ctx.message.sticker.is_animated) {
-                await ctx.reply('Animated stickers (.tgs files) are not supported. Please send a static sticker or image instead.');
-                return;
-            }
             
-            fileId = ctx.message.sticker.file_id;
+            // Check document type
+            const mimeType = ctx.message.document.mime_type || '';
+            if (mimeType === 'application/x-tgsticker') {
+                stickerType = 'animated';
+            } else if (mimeType === 'video/webm') {
+                stickerType = 'video';
+            }
+        } else if (ctx.message.sticker) {
+            // Get sticker type
+            const sticker = ctx.message.sticker;
+            stickerType = sticker.is_animated ? 'animated' : (sticker.is_video ? 'video' : 'static');
+            fileId = sticker.file_id;
         } else {
             await ctx.reply('Please send a valid image or sticker.');
             return;
         }
         
         try {
-            // Process the image/sticker to standard sticker format
-            const filePath = await processImageToFile(ctx, fileId, { 
-                width: 512, 
-                height: 462, 
-                addBuffer: true,
-                forceResize: true
-            });
+            let filePath;
+            
+            // Process according to sticker type
+            if (stickerType === 'animated' || stickerType === 'video') {
+                // Process animated/video sticker
+                const result = await processAnimatedSticker(ctx, fileId);
+                if (!result.success) {
+                    throw new Error(result.error || `Failed to process ${stickerType} sticker`);
+                }
+                filePath = result.filePath;
+                stickerType = result.type; // Use the more specific type from the processor
+            } else {
+                // Process static sticker
+                filePath = await processImageToFile(ctx, fileId, { 
+                    width: 512, 
+                    height: 462, 
+                    addBuffer: true,
+                    forceResize: true
+                });
+            }
             
             // Check if we're creating a new pack or adding to existing
             if (session.packCreationStep === 'waiting_first_sticker') {
                 // Create new pack with first sticker
-                await createStickerSet(ctx, session.currentPackName, session.packTitle, filePath);
+                await createStickerSet(ctx, session.currentPackName, session.packTitle, filePath, '😊', stickerType);
                 session.packCreationStep = 'adding_stickers';
                 
                 await ctx.reply(`Pack "${session.packTitle}" created with first sticker! Send more stickers to add to this pack.`, {
@@ -386,7 +404,7 @@ async function handleStickerForPack(ctx) {
                 });
             } else {
                 // Add to existing pack
-                await addStickerToSet(ctx, session.currentPackName, filePath);
+                await addStickerToSet(ctx, session.currentPackName, filePath, '😊', stickerType);
                 
                 await ctx.reply('Sticker added to pack! Send more stickers or press "Done" when finished.', {
                     reply_markup: {
@@ -399,21 +417,24 @@ async function handleStickerForPack(ctx) {
             }
             
             // Clean up temp file
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
-        } catch (err) {
-            console.error(`Error processing sticker: ${err.message}`);
+            safeDeleteFile(filePath, 'handleStickerForPack');
             
-            // Check if it's an unsupported format error (animated sticker)
+        } catch (err) {
+            logWithContext('handleStickerForPack', 'Error processing sticker', err);
+            
+            // Check if it's an unsupported format error
             if (err.message.includes('unsupported image format')) {
-                await ctx.reply('This appears to be an animated sticker or unsupported format. Only static stickers and images are supported.');
+                await ctx.reply('This appears to be an unsupported format. Please send a supported sticker or image.');
+            } else if (err.message.includes('STICKER_TGS_INVALID')) {
+                await ctx.reply('The animated sticker file is invalid. It must follow Telegram\'s TGS format guidelines.');
+            } else if (err.message.includes('STICKER_VIDEO_INVALID')) {
+                await ctx.reply('The video sticker file is invalid. It must be WebM with VP9 codec, max 3 seconds, max 30fps.');
             } else {
                 await ctx.reply(`Error: ${err.message}`);
             }
         }
     } catch (err) {
-        console.error('Error handling sticker for pack:', err.message);
+        logWithContext('handleStickerForPack', 'Error handling sticker for pack', err);
         await ctx.reply(`Error: ${err.message}`);
     }
 }
