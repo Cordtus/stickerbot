@@ -1,145 +1,144 @@
-# Telegram Sticker Bot
+# Telegram Sticker Bot
 
-Bot to process images into Telegram-compatible sticker formats or emotes, with persistent sticker pack management.
-
----
-
-## Features
-
-- Convert images to **Icon Format** (100x100 resolution for Telegram emotes).
-- Convert images to **Sticker Format** (512x512 resolution with a 50px transparent buffer).
-- Handles both single and multiple image uploads in a single message.
-- Processes existing Telegram stickers by adding a 50px transparent buffer.
-- Outputs processed images in `.webp` format and sends them back as documents to avoid compression.
-- **Persistent sticker pack management**:
-  - Create new sticker packs
-  - Add stickers to existing packs
-  - Add external packs to your collection
-  - Mark packs as favorites
-  - Manage your pack collection
-- Manages temporary files and cleans up automatically.
+A Telegraf‑based bot that converts images into Telegram‑ready sticker/emote formats and manages sticker packs persistently.
 
 ---
 
-## Requirements
+## Features
 
-- **Node.js** v14 or later
-- Telegram Bot Token (obtainable via [BotFather](https://core.telegram.org/bots#botfather))
-- SQLite3
-
----
-
-## Installation
-
-1. Clone the repository:
-
-    ```bash
-    git clone <repository-url>
-    cd telegram-sticker-bot
-    ```
-
-2. Install dependencies:
-
-    ```bash
-    npm install
-    ```
-
-3. Create a `.env` file:
-
-    ```sh
-    BOT_TOKEN=<your-telegram-bot-token>
-    ```
-
-4. Start the bot:
-
-    ```bash
-    npm start
-    ```
-
-   For development with live reload:
-
-   ```bash
-   npm run dev
-   ```
+| Category | Details |
+|----------|---------|
+| Image conversion | *Icon* 100 × 100 px &nbsp;·&nbsp; *Sticker* ≤ 512 × 512 px with 50 px transparent padding |
+| Sticker processing | Accepts existing `.webp` stickers, adds padding automatically |
+| Multiple uploads | Handles single files or batches in one message |
+| Output | Always returns `.webp` as **documents** to avoid Telegram re‑compression |
+| Sticker‑pack ops | Create packs · add stickers · import external packs · mark favourites · list/manage packs |
+| Reliability | Cleans up temp files automatically; persistent SQLite DB for packs/users |
 
 ---
 
-## Usage
+## Requirements
 
-1. Start the bot on Telegram using the `/start` command.
-2. Select a mode:
-    - **Icon Format**: Converts images to 100x100 for emotes.
-    - **Sticker Format**: Converts images to 512x512 (or smaller) with a 50px transparent buffer.
-    - **Manage Sticker Packs**: Create and manage your sticker collections.
-3. For image conversion, send one or more images to the bot.
-4. For sticker pack management, you can:
-    - Create a new pack and add stickers
-    - Add stickers to your existing packs
-    - Add external packs to your collection
-    - View and manage your collection
+* **Node.js ≥ 18 LTS** (recommended; v14 still works but is EOL‑soon)  
+* **Yarn ≥ 1.22** – project is Yarn‑based  
+* **SQLite 3**  
+* Telegram **Bot Token** – obtain from [BotFather](https://core.telegram.org/bots#botfather)
 
 ---
 
-## Database Schema
+## Quick Start
 
-The bot uses SQLite to store persistent data about user sticker packs:
+```bash
+# 1 · clone
+git clone https://github.com/<your‑org>/stickerbot.git
+cd stickerbot
 
-- **users**: Stores user information
-- **sticker_packs**: Stores sticker pack details
-- **stickers**: Stores information about individual stickers
-- **user_packs**: Manages the relationship between users and packs
+# 2 · install deps
+yarn install --frozen-lockfile
 
-The database file is stored in the `src/data/` directory.
+# 3 · configure
+cp .env.example .env
+$EDITOR .env            # set BOT_TOKEN, DB_PATH, etc.
 
----
+# 4 · run (development, auto‑reload)
+yarn dev
 
-## Supported Inputs
+# 5 · run (production)
+yarn start
+````
 
-- **Static Images**: JPEG, PNG, or WEBP (up to 50MB).
-- **Existing Telegram Stickers**: Adds a 50px transparent buffer.
+\### Production via systemd
 
----
+A hardened unit file is included in `deploy/stickerbot.service`.  Install with:
 
-## Development Notes
+```bash
+sudo cp deploy/stickerbot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now stickerbot
+```
 
-- Temporary files are stored in the `temp/` directory and automatically purged after 6 hours of inactivity.
+Check logs:
 
-- Sticker pack data is persisted in a SQLite database.
-
-- Modular structure:
-  - `bot.js`: Core bot functionality.
-  - `databaseManager.js`: Handles database operations.
-  - `stickerManager.js`: Manages sticker pack operations.
-  - `imageProcessor.js`: Handles image processing.
-  - `fileHandling.js`: Manages temporary files.
-  - `sessionManager.js`: Tracks user sessions and modes.
-
----
-
-## Contributing
-
-1. Fork the repository.
-2. Create a feature branch:
-
-    ```bash
-    git checkout -b feature-name
-    ```
-
-3. Commit your changes:
-
-    ```bash
-    git commit -m "Add new feature"
-    ```
-
-4. Push to the branch:
-
-    ```bash
-    git push origin feature-name
-    ```
-
-5. Open a pull request.
+```bash
+sudo journalctl -u stickerbot -f
+```
 
 ---
 
-**License**
-This project is licensed under the MIT License.
+\## Environment Variables (`.env`)
+
+| Var         | Purpose                                           |
+| ----------- | ------------------------------------------------- |
+| `BOT_TOKEN` | **Required** – token from BotFather               |
+| `DB_PATH`   | SQLite file (default: `./src/data/stickerbot.db`) |
+| `TEMP_DIR`  | Temp work dir (default: `./temp`)                 |
+| `LOG_LEVEL` | `info` · `debug` · `error` (default `info`)       |
+
+---
+
+\## Database Schema (SQLite)
+
+```
+users(id PRIMARY KEY,  telegram_id, first_name, last_name, username, created_at)
+sticker_packs(id PRIMARY KEY,  title, short_name, is_animated, owner_id FK->users, created_at)
+stickers(id PRIMARY KEY,  file_unique_id, file_id, pack_id FK->sticker_packs, emoji, created_at)
+user_packs(user_id FK->users,  pack_id FK->sticker_packs,  is_favourite, UNIQUE(user_id,pack_id))
+```
+
+DB file lives at `src/data/` (configurable via `DB_PATH`).
+
+---
+
+\## Usage
+
+1. `/start` – choose a mode: **Icon**, **Sticker**, **Manage Packs**.
+2. Send images or stickers → bot returns converted `.webp`.
+3. In *Manage Packs* you can create/import packs, add stickers, mark favourites, list packs, etc.
+
+---
+
+\## Scripts
+
+| Command      | Action                                              |
+| ------------ | --------------------------------------------------- |
+| `yarn dev`   | Run with `nodemon`/hot‑reload                       |
+| `yarn start` | Production start (`node dist/bot.js`)               |
+| `yarn build` | Transpile TypeScript (if present) & prepare `dist/` |
+| `yarn lint`  | ESLint (follows npm‑recommended rules)              |
+| `yarn clean` | Purge `dist/` and `temp/`                           |
+
+---
+
+\## Project Structure
+
+```
+src/
+  bot.js              # entry point
+  imageProcessor.js   # conversion logic (sharp/webp)
+  stickerManager.js   # pack CRUD
+  databaseManager.js  # SQLite ops
+  fileHandling.js     # temp dir cleanup
+  sessionManager.js   # per‑user state
+deploy/
+  stickerbot.service  # systemd unit
+temp/                 # ephemeral work files
+```
+
+---
+
+\## Contributing
+
+```bash
+git checkout -b feature/my-awesome-idea
+# hack…
+git commit -s -m "feat: my awesome idea"
+git push origin feature/my-awesome-idea
+```
+
+Then open a Pull Request.
+
+---
+
+\## License
+
+MIT
