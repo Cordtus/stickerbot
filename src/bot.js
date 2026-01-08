@@ -137,7 +137,7 @@ const bot = new Telegraf(process.env.BOT_TOKEN, {
         apiRoot: 'https://api.telegram.org',
         webhookReply: false
     },
-    handlerTimeout: 15000
+    handlerTimeout: 120000  // 2 minutes for video processing
 });
 
 // Initialize database and system detection
