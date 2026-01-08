@@ -38,3 +38,15 @@ coverage
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Internal documentation (Claude-generated)
+CLAUDE.md
+PROJECT_BLUEPRINT.md
+.claude/
+
+# Broken/temp git directories
+.git.broken.*/
+
+# Test artifacts
+stickerPacks
+title

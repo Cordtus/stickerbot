@@ -1,23 +1,75 @@
-// databaseManager.js
+// databaseManager.js 
 
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 // Get the directory name correctly in ES module
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = path.join(__dirname, 'data', 'stickerpacks.db');
 
-// Ensure data directory exists
-import fs from 'fs';
-const dataDir = path.join(__dirname, 'data');
+const rootDir = path.resolve(__dirname, '..');
+const dataDir = path.join(rootDir, 'data');
+const dbPath = path.join(dataDir, 'stickerpacks.db');
+
+console.log(`Database path: ${dbPath}`);
+
+// Ensure data dir
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
+  console.log(`Created data directory: ${dataDir}`);
+} else {
+  console.log(`Data directory exists: ${dataDir}`);
 }
 
 // Database connection
 let db = null;
+
+/**
+ * Migrate database to ensure all columns exist
+ * Since your database already has the correct schema, this will be a no-op
+ */
+async function migrateDatabase() {
+  if (!db) return;
+  
+  try {
+    // Check if tables exist
+    const tables = await db.all("SELECT name FROM sqlite_master WHERE type='table'");
+    const tableNames = tables.map(t => t.name);
+    
+    if (!tableNames.includes('sticker_packs')) {
+      console.log('Creating tables (first run)...');
+      return; // Let initDatabase create them
+    }
+    
+    // Your database already has all the correct columns, so this should be quick
+    const tableInfo = await db.all("PRAGMA table_info(sticker_packs)");
+    const columns = tableInfo.map(col => col.name);
+    
+    const expectedColumns = ['id', 'name', 'title', 'owner_id', 'is_animated', 'is_video', 'created_at', 'last_modified'];
+    const missingColumns = expectedColumns.filter(col => !columns.includes(col));
+    
+    if (missingColumns.length === 0) {
+      console.log('✅ Database schema is up to date');
+    } else {
+      console.log('Missing columns:', missingColumns);
+      // Add any missing columns (shouldn't happen with your DB)
+      for (const col of missingColumns) {
+        if (col === 'is_animated') {
+          await db.exec('ALTER TABLE sticker_packs ADD COLUMN is_animated BOOLEAN DEFAULT 0');
+        } else if (col === 'is_video') {
+          await db.exec('ALTER TABLE sticker_packs ADD COLUMN is_video BOOLEAN DEFAULT 0');
+        } else if (col === 'last_modified') {
+          await db.exec('ALTER TABLE sticker_packs ADD COLUMN last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+        }
+      }
+    }
+    
+  } catch (err) {
+    console.error('Database migration error:', err);
+  }
+}
 
 /**
  * Initialize the database
@@ -37,7 +89,7 @@ async function initDatabase() {
     // Enable foreign keys
     await db.exec('PRAGMA foreign_keys = ON');
     
-    // Create tables if they don't exist
+    // Create tables if not exist
     await db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
@@ -80,6 +132,9 @@ async function initDatabase() {
         FOREIGN KEY (pack_id) REFERENCES sticker_packs(id) ON DELETE CASCADE
       );
     `);
+    
+    // Run migration to ensure all columns exist
+    await migrateDatabase();
     
     console.log('Database initialized successfully');
     return db;
@@ -234,7 +289,7 @@ async function canUserEditPack(userId, packName) {
 /**
  * Add external sticker pack to user's collection
  */
-async function addExternalStickerPack(userId, packName, packTitle) {
+async function addExternalPack(userId, packName, packTitle) {
   return await addStickerPack(userId, packName, packTitle || packName, false);
 }
 
@@ -270,11 +325,10 @@ async function getStickersInPack(packId) {
   const db = await initDatabase();
   
   try {
-    return await db.all(`
-      SELECT * FROM stickers
-      WHERE pack_id = ?
-      ORDER BY position
-    `, packId);
+    return await db.all(
+      'SELECT * FROM stickers WHERE pack_id = ? ORDER BY position ASC',
+      packId
+    );
   } catch (err) {
     console.error('Error getting stickers in pack:', err);
     return [];
@@ -282,29 +336,27 @@ async function getStickersInPack(packId) {
 }
 
 /**
- * Toggle favorite status of a pack
+ * Toggle favorite status
  */
 async function toggleFavoritePack(userId, packId) {
   const db = await initDatabase();
   
   try {
-    const userPack = await db.get(
-      'SELECT * FROM user_packs WHERE user_id = ? AND pack_id = ?',
+    const current = await db.get(
+      'SELECT is_favorite FROM user_packs WHERE user_id = ? AND pack_id = ?',
       [userId, packId]
     );
     
-    if (!userPack) {
-      throw new Error('User does not have access to this pack');
+    if (current) {
+      const newStatus = current.is_favorite ? 0 : 1;
+      await db.run(
+        'UPDATE user_packs SET is_favorite = ? WHERE user_id = ? AND pack_id = ?',
+        [newStatus, userId, packId]
+      );
+      return newStatus === 1;
     }
     
-    const newFavoriteStatus = userPack.is_favorite === 1 ? 0 : 1;
-    
-    await db.run(
-      'UPDATE user_packs SET is_favorite = ? WHERE user_id = ? AND pack_id = ?',
-      [newFavoriteStatus, userId, packId]
-    );
-    
-    return newFavoriteStatus === 1;
+    return false;
   } catch (err) {
     console.error('Error toggling favorite pack:', err);
     throw err;
@@ -312,7 +364,7 @@ async function toggleFavoritePack(userId, packId) {
 }
 
 /**
- * Remove user's access to a pack
+ * Remove user pack relationship
  */
 async function removeUserPack(userId, packId) {
   const db = await initDatabase();
@@ -323,23 +375,28 @@ async function removeUserPack(userId, packId) {
       [userId, packId]
     );
     
-    // If no users have access to this pack and it's not owned by anyone, delete it
-    const packUsers = await db.get(
-      'SELECT COUNT(*) as count FROM user_packs WHERE pack_id = ?',
-      packId
-    );
-    
-    if (packUsers.count === 0) {
-      const pack = await db.get('SELECT * FROM sticker_packs WHERE id = ?', packId);
-      
-      if (!pack || pack.owner_id === userId) {
-        await db.run('DELETE FROM sticker_packs WHERE id = ?', packId);
-      }
-    }
-    
     return true;
   } catch (err) {
     console.error('Error removing user pack:', err);
+    throw err;
+  }
+}
+
+/**
+ * Update sticker pack type flags
+ */
+async function updateStickerPackType(packId, isAnimated = false, isVideo = false) {
+  const db = await initDatabase();
+  
+  try {
+    await db.run(
+      'UPDATE sticker_packs SET is_animated = ?, is_video = ?, last_modified = CURRENT_TIMESTAMP WHERE id = ?',
+      [isAnimated ? 1 : 0, isVideo ? 1 : 0, packId]
+    );
+    
+    return true;
+  } catch (err) {
+    console.error('Error updating sticker pack type:', err);
     throw err;
   }
 }
@@ -375,10 +432,11 @@ export {
   getUserStickerPacks,
   getStickerPackByName,
   canUserEditPack,
-  addExternalStickerPack,
+  addExternalPack,
   addStickerToDatabase,
   getStickersInPack,
   toggleFavoritePack,
   removeUserPack,
+  updateStickerPackType,
   getPackStats
 };

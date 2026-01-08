@@ -1,144 +1,228 @@
-# Telegram Sticker Bot
+# Telegram Sticker Bot
 
-A Telegraf‑based bot that converts images into Telegram‑ready sticker/emote formats and manages sticker packs persistently.
+Bot to process images, videos, and GIFs into Telegram-compatible sticker formats or emotes, with persistent sticker pack management.
 
 ---
 
-## Features
+## Features
 
 | Category | Details |
 |----------|---------|
-| Image conversion | *Icon* 100 × 100 px &nbsp;·&nbsp; *Sticker* ≤ 512 × 512 px with 50 px transparent padding |
-| Sticker processing | Accepts existing `.webp` stickers, adds padding automatically |
-| Multiple uploads | Handles single files or batches in one message |
-| Output | Always returns `.webp` as **documents** to avoid Telegram re‑compression |
-| Sticker‑pack ops | Create packs · add stickers · import external packs · mark favourites · list/manage packs |
-| Reliability | Cleans up temp files automatically; persistent SQLite DB for packs/users |
+| Image conversion | *Emoticon* 100 × 100 px &nbsp;·&nbsp; *Sticker* ≤ 512 × 512 px with 50 px transparent padding |
+| Video conversion | *Emoticon* 100 × 100 px &nbsp;·&nbsp; *Sticker* ≤ 512 × 512 px with transparent padding, max 6s input → 3s output |
+| GPU acceleration | NVIDIA hardware encoding/decoding (h264_nvenc, h264_cuvid), CPU fallback |
+| Processing controls | User blocking during conversion, 60s cooldown, timeout protection |
+| File handling | Single or multiple files per message |
+| Sticker processing | Fixes timestamp obscuring existing Telegram stickers by adding 50px transparent buffer |
+| Output formats | Images: `.webp` &nbsp;·&nbsp; Videos: `.webm` (VP9) to avoid re‑compression |
+| Metrics | Detailed before/after statistics: size, duration, FPS, resolution, processing time |
+| Sticker‑pack ops | Create packs · add stickers · import external packs · mark favorites · manage collections |
+| Video features | WebM conversion · duration limiting (3s max) · size optimization (256KB max) · frame rate standardization · transparent background preservation |
+| Reliability | Automatic temp file cleanup; persistent SQLite DB for packs/users |
 
 ---
 
-## Requirements
+## Deploy your own instance
 
-* **Node.js ≥ 18 LTS** (recommended; v14 still works but is EOL‑soon)  
-* **Yarn ≥ 1.22** – project is Yarn‑based  
-* **SQLite 3**  
-* Telegram **Bot Token** – obtain from [BotFather](https://core.telegram.org/bots#botfather)
+### Requirements
 
----
-
-## Quick Start
-
-```bash
-# 1 · clone
-git clone https://github.com/<your‑org>/stickerbot.git
-cd stickerbot
-
-# 2 · install deps
-yarn install --frozen-lockfile
-
-# 3 · configure
-cp .env.example .env
-$EDITOR .env            # set BOT_TOKEN, DB_PATH, etc.
-
-# 4 · run (development, auto‑reload)
-yarn dev
-
-# 5 · run (production)
-yarn start
-````
-
-\### Production via systemd
-
-A hardened unit file is included in `deploy/stickerbot.service`.  Install with:
-
-```bash
-sudo cp deploy/stickerbot.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now stickerbot
-```
-
-Check logs:
-
-```bash
-sudo journalctl -u stickerbot -f
-```
+- **Node.js**
+- Telegram Bot Token (obtainable via [BotFather](https://core.telegram.org/bots#botfather))
+- SQLite3
+- **FFmpeg** (for video/GIF processing)
 
 ---
 
-\## Environment Variables (`.env`)
+## Installation
 
-| Var         | Purpose                                           |
-| ----------- | ------------------------------------------------- |
-| `BOT_TOKEN` | **Required** – token from BotFather               |
-| `DB_PATH`   | SQLite file (default: `./src/data/stickerbot.db`) |
-| `TEMP_DIR`  | Temp work dir (default: `./temp`)                 |
-| `LOG_LEVEL` | `info` · `debug` · `error` (default `info`)       |
+1. Clone the repository:
 
----
+    ```bash
+    git clone <repository-url>
+    cd telegram-sticker-bot
+    ```
 
-\## Database Schema (SQLite)
+2. Install dependencies:
 
-```
-users(id PRIMARY KEY,  telegram_id, first_name, last_name, username, created_at)
-sticker_packs(id PRIMARY KEY,  title, short_name, is_animated, owner_id FK->users, created_at)
-stickers(id PRIMARY KEY,  file_unique_id, file_id, pack_id FK->sticker_packs, emoji, created_at)
-user_packs(user_id FK->users,  pack_id FK->sticker_packs,  is_favourite, UNIQUE(user_id,pack_id))
-```
+    ```bash
+    yarn install
+    ```
 
-DB file lives at `src/data/` (configurable via `DB_PATH`).
+3. **Install FFmpeg** (for video support):
 
----
+    FFmpeg is a separate system binary required for video processing. The Node.js dependency `fluent-ffmpeg` is just a wrapper that requires the actual FFmpeg executable to be installed on your system.
 
-\## Usage
+    ```bash
+    # macOS
+    brew install ffmpeg
 
-1. `/start` – choose a mode: **Icon**, **Sticker**, **Manage Packs**.
-2. Send images or stickers → bot returns converted `.webp`.
-3. In *Manage Packs* you can create/import packs, add stickers, mark favourites, list packs, etc.
+    # Ubuntu/Debian
+    sudo apt update && sudo apt install ffmpeg
+    ```
 
----
+    > Without FFmpeg, the bot will work normally but only process images.
 
-\## Scripts
+4. Create `.env` file:
 
-| Command      | Action                                              |
-| ------------ | --------------------------------------------------- |
-| `yarn dev`   | Run with `nodemon`/hot‑reload                       |
-| `yarn start` | Production start (`node dist/bot.js`)               |
-| `yarn build` | Transpile TypeScript (if present) & prepare `dist/` |
-| `yarn lint`  | ESLint (follows npm‑recommended rules)              |
-| `yarn clean` | Purge `dist/` and `temp/`                           |
+    ```sh
+    BOT_TOKEN=<your-telegram-bot-token>
+    ```
 
----
+    > *For systemd users, `BOT_TOKEN` can also be defined in the service file*
 
-\## Project Structure
+5. Start:
 
-```
-src/
-  bot.js              # entry point
-  imageProcessor.js   # conversion logic (sharp/webp)
-  stickerManager.js   # pack CRUD
-  databaseManager.js  # SQLite ops
-  fileHandling.js     # temp dir cleanup
-  sessionManager.js   # per‑user state
-deploy/
-  stickerbot.service  # systemd unit
-temp/                 # ephemeral work files
-```
+    ```bash
+    yarn start
+    ```
+
+   For development (auto-reload on code changes):
+
+   ```bash
+   yarn dev
+   ```
 
 ---
 
-\## Contributing
+## Usage
 
-```bash
-git checkout -b feature/my-awesome-idea
-# hack…
-git commit -s -m "feat: my awesome idea"
-git push origin feature/my-awesome-idea
-```
+1. Start the bot on Telegram using the `/start` command.
+2. Select a mode:
+    - **Emoticon Format**: Converts media to 100x100 for emotes.
+    - **Sticker Format**: Converts media to 512x512 with a 50px transparent buffer.
+    - **Manage Sticker Packs**: Create and manage your sticker collections.
+3. For media conversion, send one or more images, videos, or GIFs to the bot.
+4. For sticker pack management, you can:
+    - Create a new pack and add stickers (images, videos, GIFs)
+    - Add stickers to your existing packs
+    - Add external packs to your collection
+    - View and manage your collection
 
-Then open a Pull Request.
+### Video Processing Notes
+
+- **Duration Limit**: Videos and GIFs up to 6 seconds input, automatically processed to 3 seconds (Telegram requirement)
+- **Size Optimization**: Output files compressed to meet Telegram's 256KB limit
+- **GPU Acceleration**: NVIDIA hardware acceleration when available, CPU fallback
+- **Format Conversion**: All videos/GIFs converted to WebM format for optimal compatibility
+- **Quality Settings**: Automatic quality adjustment based on content complexity
+- **Processing Controls**: User blocking during conversion with 60-second cooldown
+- **Detailed Metrics**: Before/after statistics including processing time and hardware used
 
 ---
 
-\## License
+## Commands
 
-MIT
+- `/start` - Start the bot and select a mode
+- `/help` - Show detailed help message
+- `/cancel` - Cancel current operation
+- `/status` - Show current bot and session status
+
+---
+
+## Database Schema
+
+The bot uses SQLite to store persistent data about user sticker packs:
+
+- **users**: Stores user information
+- **sticker_packs**: Stores sticker pack details (including animated/video type flags)
+- **stickers**: Stores information about individual stickers
+- **user_packs**: Manages the relationship between users and packs
+
+The database file is stored in the `src/data/` directory.
+
+---
+
+## Supported Inputs
+
+### Images
+
+- **Static Images**: JPEG, PNG, or WebP (up to 50MB)
+- **Existing Telegram Stickers**: Adds a 50px transparent buffer
+
+### Videos
+
+- **Video Files**: MP4, MOV, AVI, WebM (up to 50MB, max 6 seconds input duration)
+- **Animated GIFs**: GIF format (up to 50MB, max 6 seconds input duration)
+- **Output**: WebM format optimized for Telegram stickers
+
+### File Size Limits
+
+- **Download**: 50MB (Telegram API limit)
+- **Processing**: Up to 50MB input files
+- **Output**: 256KB max for sticker compatibility
+- **Duration**: 6 seconds max input, 3 seconds max output for video stickers
+
+---
+
+## Technical Details
+
+### Video Processing Pipeline
+
+1. **Download**: Secure download from Telegram servers
+2. **Validation**: Check file size, duration, and format
+3. **GPU Detection**: Automatic NVIDIA hardware acceleration detection
+4. **Conversion**: FFmpeg processing with optimized settings (GPU or CPU)
+5. **Smart Processing**: Speed adjustment for 3-6s videos, progressive compression
+6. **Scaling**: Automatic resolution adjustment (512x512 max)
+7. **Output**: WebM format with VP9 codec and alpha channel support
+
+### Performance Optimization
+
+- **GPU Acceleration**: 5-15x faster encoding with NVIDIA hardware
+- **Processing Controls**: Per-user locks prevent resource conflicts
+- **Memory Management**: Streaming processing for large files
+- **Automatic Cleanup**: Temporary file cleanup and session management
+- **Error Recovery**: Graceful handling of processing failures
+
+---
+
+## Development Notes
+
+- Temporary files are stored in the `temp/` directory and automatically purged after 6 hours of inactivity.
+- Sticker pack data is persisted in a SQLite database.
+- Video processing is optional and gracefully disabled if FFmpeg is not available.
+- GPU acceleration automatically detected and utilized when available.
+
+### Modular Structure
+
+- `bot.js`: Core bot functionality with FFmpeg detection
+- `videoProcessor.js`: Handles video and GIF processing with GPU acceleration
+- `imageProcessor.js`: Handles static image processing
+- `stickerManager.js`: Manages sticker pack operations with video support
+- `databaseManager.js`: Handles database operations
+- `sessionManager.js`: Tracks user sessions, processing states, and cooldowns
+- `messageHandlers.js`: Message type routing and processing control
+- `callbackHandlers.js`: Inline keyboard callbacks
+- `commandHandlers.js`: Bot commands
+- `fileHandler.js`: Temporary file management
+- `utils.js`: Utility functions
+
+---
+
+## Contributing
+
+1. Fork the repository.
+2. Create a feature branch:
+
+    ```bash
+    git checkout -b feature-name
+    ```
+
+3. Commit your changes:
+
+    ```bash
+    git commit -m "Add new feature"
+    ```
+
+4. Push to the branch:
+
+    ```bash
+    git push origin feature-name
+    ```
+
+5. Open a pull request.
+
+---
+
+**License**
+This project is licensed under the MIT License.
