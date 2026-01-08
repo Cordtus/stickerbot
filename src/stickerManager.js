@@ -1,13 +1,15 @@
 // stickerManager.js
 
 import fs from 'fs';
+import path from 'path';
 import { 
   addStickerPack, 
   canUserEditPack as dbCanUserEditPack, 
   getStickerPackByName,
   addStickerToDatabase,
   getUserStickerPacks as dbGetUserStickerPacks,
-  addExternalStickerPack as dbAddExternalStickerPack
+  addExternalPack as dbaddExternalPack,
+  updateStickerPackType
 } from './databaseManager.js';
 
 // Enhanced logger
@@ -17,6 +19,33 @@ function logWithContext(context, message, error = null) {
   if (error) {
       console.error(`[${timestamp}] [${context}] ERROR: ${error.message}`);
       console.error(error.stack);
+  }
+}
+
+/**
+ * Detect sticker type from file path
+ */
+function detectStickerType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  
+  if (ext === '.webm') {
+    return {
+      isVideo: true,
+      isAnimated: false,
+      stickerType: 'video'
+    };
+  } else if (ext === '.tgs') {
+    return {
+      isVideo: false,
+      isAnimated: true,
+      stickerType: 'animated'
+    };
+  } else {
+    return {
+      isVideo: false,
+      isAnimated: false,
+      stickerType: 'static'
+    };
   }
 }
 
@@ -38,7 +67,10 @@ async function getUserStickerSets(ctx) {
       title: pack.title,
       can_edit: pack.can_edit === 1,
       is_favorite: pack.is_favorite === 1,
-      owner_id: pack.owner_id
+      is_animated: pack.is_animated === 1,
+      is_video: pack.is_video === 1,
+      owner_id: pack.owner_id,
+      sticker_type: pack.is_video ? 'video' : (pack.is_animated ? 'animated' : 'static')
     }));
   } catch (error) {
     logWithContext('getUserStickerSets', 'Error getting user sticker sets', error);
@@ -47,12 +79,12 @@ async function getUserStickerSets(ctx) {
 }
 
 /**
- * Create a new sticker set
+ * create new sticker set
  */
-async function createStickerSet(ctx, name, title, firstStickerPath = null, firstStickerEmoji = '😊') {
+async function createStickerSet(ctx, name, title, firstStickerPath = null, firstStickerEmoji = '😊', isVideo = false) {
   try {
     const userId = ctx.from.id;
-    logWithContext('createStickerSet', `Creating sticker set "${name}" (${title}) for user ${userId}`);
+    logWithContext('createStickerSet', `Creating sticker set "${name}" (${title}) for user ${userId}, isVideo: ${isVideo}`);
     
     // If we have a first sticker, add it during creation
     if (firstStickerPath) {
@@ -61,29 +93,49 @@ async function createStickerSet(ctx, name, title, firstStickerPath = null, first
         throw new Error(`Sticker file not found at path: ${firstStickerPath}`);
       }
       
+      // Detect sticker type from file
+      const stickerType = detectStickerType(firstStickerPath);
+      logWithContext('createStickerSet', `Detected sticker type: ${stickerType.stickerType}`);
+      
       // Log file stats
       const fileStats = fs.statSync(firstStickerPath);
-      logWithContext('createStickerSet', `First sticker file: ${firstStickerPath}, size: ${fileStats.size} bytes`);
+      logWithContext('createStickerSet', `First sticker file: ${firstStickerPath}, size: ${fileStats.size} bytes, type: ${stickerType.stickerType}`);
       
-      // Create form data with sticker image
+      // Read sticker file
       const stickerFile = fs.readFileSync(firstStickerPath);
       
-      // Call Telegram API to create sticker set with first sticker
+      // Prepare API parameters based on sticker type
+      let apiParams = {
+        user_id: userId,
+        name: name,
+        title: title,
+        emojis: firstStickerEmoji
+      };
+      
+      // Fset sticker file parameter based on file type
+      if (stickerType.isVideo) {
+        apiParams.webm_sticker = { source: stickerFile, filename: 'sticker.webm' };
+        logWithContext('createStickerSet', 'Creating video sticker set');
+      } else if (stickerType.isAnimated) {
+        apiParams.tgs_sticker = { source: stickerFile, filename: 'sticker.tgs' };
+        logWithContext('createStickerSet', 'Creating animated sticker set');
+      } else {
+        apiParams.png_sticker = { source: stickerFile, filename: 'sticker.webp' };
+        logWithContext('createStickerSet', 'Creating static sticker set');
+      }
+      
+      // Call Telegram API to create sticker set
       try {
-        logWithContext('createStickerSet', `Calling Telegram API to create sticker set with first sticker`);
+        logWithContext('createStickerSet', `Calling Telegram API to create ${stickerType.stickerType} sticker set`);
         
-        // Use the direct method instead of createNewStickerSet which may be having issues
-        const result = await ctx.telegram.callApi('createNewStickerSet', {
-          user_id: userId,
-          name: name,
-          title: title,
-          emojis: firstStickerEmoji,
-          png_sticker: { source: stickerFile, filename: 'sticker.webp' }
-        });
+        const result = await ctx.telegram.callApi('createNewStickerSet', apiParams);
         
-        // Save to our database
+        // Save to our database with correct type flags
         logWithContext('createStickerSet', `Sticker set created on Telegram, saving to database`);
         const packId = await addStickerPack(userId, name, title);
+        
+        // Update pack type in database
+        await updateStickerPackType(packId, stickerType.isAnimated, stickerType.isVideo);
         
         // Get the sticker's file_id from Telegram's response if possible
         try {
@@ -108,6 +160,15 @@ async function createStickerSet(ctx, name, title, firstStickerPath = null, first
           throw new Error('You have created too many sticker sets. Remove some before creating new ones.');
         } else if (telegramError.message.includes('PEER_ID_INVALID')) {
           throw new Error('Unable to create a sticker set for this user. Please restart with /start and try again.');
+        } else if (telegramError.message.includes('STICKER_VIDEO_BIG')) {
+          throw new Error('Video sticker file is too large. Maximum size is 256KB.');
+        } else if (telegramError.message.includes('STICKER_VIDEO_NODURATION')) {
+          throw new Error('Video sticker must have a valid duration.');
+        } else if (telegramError.message.includes('STICKER_VIDEO_DIMENSIONS')) {
+          // NEW: Handle video dimension error
+          throw new Error('Video sticker dimensions are invalid. One dimension must be exactly 512 pixels, the other 512 or less. Please try processing the video again.');
+        } else if (telegramError.message.includes('STICKER_PNG_DIMENSIONS')) {
+          throw new Error('Sticker dimensions are invalid. One dimension must be exactly 512 pixels, the other 512 or less.');
         } else {
           throw telegramError;
         }
@@ -125,14 +186,20 @@ async function createStickerSet(ctx, name, title, firstStickerPath = null, first
 /**
  * Add sticker to existing set
  */
-async function addStickerToSet(ctx, setName, stickerPath, emoji = '😊') {
+async function addStickerToSet(ctx, setName, stickerPath, emoji = '😊', isVideo = false) {
   try {
     const userId = ctx.from.id;
-    logWithContext('addStickerToSet', `Adding sticker to set "${setName}" for user ${userId}`);
+    logWithContext('addStickerToSet', `Adding sticker to set "${setName}" for user ${userId}, isVideo: ${isVideo}`);
     
     // Ensure user can edit this pack
     if (!await canUserEditPack(ctx, setName)) {
       throw new Error("You don't have permission to edit this sticker pack.");
+    }
+    
+    // Get existing pack info to validate type compatibility
+    const existingPack = await getStickerPackByName(setName);
+    if (!existingPack) {
+      throw new Error('Sticker pack not found.');
     }
     
     // Check file exists
@@ -140,24 +207,52 @@ async function addStickerToSet(ctx, setName, stickerPath, emoji = '😊') {
       throw new Error(`Sticker file not found at path: ${stickerPath}`);
     }
     
+    // Detect new sticker type
+    const newStickerType = detectStickerType(stickerPath);
+    
+    // Validate type compatibility with existing pack
+    const packIsVideo = existingPack.is_video === 1;
+    const packIsAnimated = existingPack.is_animated === 1;
+    
+    if (packIsVideo && !newStickerType.isVideo) {
+      throw new Error('Cannot add static/animated stickers to a video sticker pack.');
+    } else if (packIsAnimated && !newStickerType.isAnimated) {
+      throw new Error('Cannot add static/video stickers to an animated sticker pack.');
+    } else if (!packIsVideo && !packIsAnimated && (newStickerType.isVideo || newStickerType.isAnimated)) {
+      throw new Error('Cannot add video/animated stickers to a static sticker pack.');
+    }
+    
     // Log file stats
     const fileStats = fs.statSync(stickerPath);
-    logWithContext('addStickerToSet', `Sticker file: ${stickerPath}, size: ${fileStats.size} bytes`);
+    logWithContext('addStickerToSet', `Sticker file: ${stickerPath}, size: ${fileStats.size} bytes, type: ${newStickerType.stickerType}`);
     
     // Read sticker file
     const stickerFile = fs.readFileSync(stickerPath);
     
-    // Call Telegram API to add sticker to set
+    // Prepare API parameters based on sticker type
+    let apiParams = {
+      user_id: userId,
+      name: setName,
+      emojis: emoji
+    };
+    
+    // Set sticker file parameter based on type
+    if (newStickerType.isVideo) {
+      apiParams.webm_sticker = { source: stickerFile, filename: 'sticker.webm' };
+      logWithContext('addStickerToSet', 'Adding video sticker');
+    } else if (newStickerType.isAnimated) {
+      apiParams.tgs_sticker = { source: stickerFile, filename: 'sticker.tgs' };
+      logWithContext('addStickerToSet', 'Adding animated sticker');
+    } else {
+      apiParams.png_sticker = { source: stickerFile, filename: 'sticker.webp' };
+      logWithContext('addStickerToSet', 'Adding static sticker');
+    }
+    
+    // Add sticker to set - telegram side
     try {
-      logWithContext('addStickerToSet', `Calling Telegram API to add sticker to set`);
+      logWithContext('addStickerToSet', `Calling Telegram API to add ${newStickerType.stickerType} sticker to set`);
       
-      // Use direct API call instead of the wrapper
-      const result = await ctx.telegram.callApi('addStickerToSet', {
-        user_id: userId,
-        name: setName,
-        emojis: emoji,
-        png_sticker: { source: stickerFile, filename: 'sticker.webp' }
-      });
+      const result = await ctx.telegram.callApi('addStickerToSet', apiParams);
       
       // Get the sticker's file_id from Telegram's response if possible
       try {
@@ -185,13 +280,22 @@ async function addStickerToSet(ctx, setName, stickerPath, emoji = '😊') {
       // Detailed error logging for Telegram API errors
       logWithContext('addStickerToSet', `Telegram API error adding sticker to set`, telegramError);
       
-      // Better error messages for common issues
+      // Common error messages with more helpful descriptions
       if (telegramError.message.includes('STICKERSET_INVALID')) {
         throw new Error('Invalid sticker set. The set may not exist or you may not have permission to edit it.');
       } else if (telegramError.message.includes('STICKERS_TOO_MUCH')) {
         throw new Error('This sticker set has reached the maximum number of stickers. Create a new set.');
       } else if (telegramError.message.includes('STICKER_PNG_DIMENSIONS')) {
         throw new Error('The sticker dimensions are invalid. Stickers must be 512x512 pixels with proper transparent areas.');
+      } else if (telegramError.message.includes('STICKER_VIDEO_BIG')) {
+        throw new Error('Video sticker file is too large. Maximum size is 256KB.');
+      } else if (telegramError.message.includes('STICKER_VIDEO_NODURATION')) {
+        throw new Error('Video sticker must have a valid duration.');
+      } else if (telegramError.message.includes('STICKER_VIDEO_DIMENSIONS')) {
+        // NEW: Handle video dimension error
+        throw new Error('Video sticker dimensions are invalid. One dimension must be exactly 512 pixels, the other 512 or less. The video may need to be reprocessed with correct dimensions.');
+      } else if (telegramError.message.includes('STICKER_ANIMATED_UPGRADE_NEEDED')) {
+        throw new Error('Cannot add animated stickers to this pack type.');
       } else {
         throw telegramError;
       }
@@ -236,7 +340,7 @@ async function setStickerPosition(ctx, stickerId, position) {
 }
 
 /**
- * Generate a valid sticker set name
+ * Generate sticker set name
  */
 function generateStickerSetName(ctx, title) {
   // Remove non-alphanumeric characters and convert to lowercase
@@ -283,27 +387,39 @@ async function canUserEditPack(ctx, packName) {
 /**
  * Add external sticker pack for a user
  */
-async function addExternalStickerPack(ctx, packName) {
+async function addExternalPack(ctx, packName) {
   try {
     const userId = ctx.from.id;
-    logWithContext('addExternalStickerPack', `Adding external pack ${packName} for user ${userId}`);
+    logWithContext('addExternalPack', `Adding external pack ${packName} for user ${userId}`);
     
-    // Get pack info from Telegram to get the title
+    // Get pack info from Telegram to get the title and type
     let packTitle = packName;
+    let isAnimated = false;
+    let isVideo = false;
+    
     try {
       const packInfo = await ctx.telegram.getStickerSet(packName);
       if (packInfo && packInfo.title) {
         packTitle = packInfo.title;
-        logWithContext('addExternalStickerPack', `Got title from Telegram: "${packTitle}"`);
+        isAnimated = packInfo.is_animated || false;
+        isVideo = packInfo.is_video || false;
+        logWithContext('addExternalPack', `Got pack info from Telegram: "${packTitle}", animated: ${isAnimated}, video: ${isVideo}`);
       }
     } catch (err) {
-      logWithContext('addExternalStickerPack', `Couldn't get info for external pack`, err);
+      logWithContext('addExternalPack', `Couldn't get info for external pack`, err);
     }
     
-    await dbAddExternalStickerPack(userId, packName, packTitle);
+    // Add to database
+    const packId = await dbaddExternalPack(userId, packName, packTitle);
+    
+    // Update pack type if we detected it
+    if (isAnimated || isVideo) {
+      await updateStickerPackType(packId, isAnimated, isVideo);
+    }
+    
     return true;
   } catch (error) {
-    logWithContext('addExternalStickerPack', `Error adding external sticker pack`, error);
+    logWithContext('addExternalPack', `Error adding external sticker pack`, error);
     throw new Error(`Failed to add external sticker pack: ${error.message}`);
   }
 }
@@ -317,5 +433,6 @@ export {
   getStickerSet,
   generateStickerSetName,
   canUserEditPack,
-  addExternalStickerPack
+  addExternalPack,
+  detectStickerType
 };
