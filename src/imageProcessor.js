@@ -57,16 +57,29 @@ async function processImage(ctx, fileId, options) {
         console.log(`Processing image: ${fileId}, Dimensions: ${metadata.width}x${metadata.height}`);
 
         let sharpInstance = sharp(buffer);
-        
-        // Always force resize in icon mode, regardless of file type
+
+        // Resize based on mode
         if (options.width && options.height) {
-            console.log(`Resizing to ${options.width}x${options.height}, forceResize=${options.forceResize === true}`);
-            sharpInstance = sharpInstance.resize({
-                width: options.width,
-                height: options.height,
-                fit: sharp.fit.cover,
-                withoutEnlargement: false  // Always resize even if smaller
-            });
+            if (options.padToExact) {
+                // Icon/emoji mode: fit inside dimensions, pad with transparency to exact size
+                console.log(`Resizing to ${options.width}x${options.height} with transparent padding`);
+                sharpInstance = sharpInstance.resize({
+                    width: options.width,
+                    height: options.height,
+                    fit: sharp.fit.contain,
+                    withoutEnlargement: false,
+                    background: { r: 0, g: 0, b: 0, alpha: 0 }
+                });
+            } else {
+                // Sticker mode: fit inside dimensions, preserve aspect ratio
+                console.log(`Resizing to fit inside ${options.width}x${options.height}`);
+                sharpInstance = sharpInstance.resize({
+                    width: options.width,
+                    height: options.height,
+                    fit: sharp.fit.inside,
+                    withoutEnlargement: false
+                });
+            }
         }
 
         if (options.addBuffer) {
