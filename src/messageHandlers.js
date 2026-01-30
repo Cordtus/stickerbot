@@ -125,11 +125,12 @@ async function handlePhotoDocument(ctx) {
             const response = await fetch(fileLink);
             const buffer = Buffer.from(await response.arrayBuffer());
             
-            // Force resize to 100x100 for icon mode
+            // Resize to fit inside 100x100, pad with transparency to exact dimensions
             const processedBuffer = await sharp(buffer)
                 .resize(100, 100, {
-                    fit: sharp.fit.cover,
-                    withoutEnlargement: false  // Force resize regardless of original size
+                    fit: sharp.fit.contain,
+                    withoutEnlargement: false,
+                    background: { r: 0, g: 0, b: 0, alpha: 0 }
                 })
                 .webp({ lossless: true })
                 .toBuffer();
@@ -195,9 +196,9 @@ async function handlePhotoDocument(ctx) {
     session.images = files;
 
     try {
-        const results = await processImages(ctx, session.images, 
-            session.mode === 'icon' 
-                ? { width: 100, height: 100, forceResize: true } 
+        const results = await processImages(ctx, session.images,
+            session.mode === 'icon'
+                ? { width: 100, height: 100, padToExact: true }
                 : { width: 512, height: 462, addBuffer: true }
         );
 
@@ -472,11 +473,12 @@ async function handleSticker(ctx) {
             const response = await fetch(fileLink);
             const buffer = Buffer.from(await response.arrayBuffer());
             
-            // Force resize to 100x100 for icon mode
+            // Resize to fit inside 100x100, pad with transparency to exact dimensions
             const processedBuffer = await sharp(buffer)
                 .resize(100, 100, {
-                    fit: sharp.fit.cover,
-                    withoutEnlargement: false  // Force resize regardless of original size
+                    fit: sharp.fit.contain,
+                    withoutEnlargement: false,
+                    background: { r: 0, g: 0, b: 0, alpha: 0 }
                 })
                 .webp({ lossless: true })
                 .toBuffer();
