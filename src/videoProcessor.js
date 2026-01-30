@@ -9,22 +9,6 @@ import { getSystemSpec } from './configurator.js';
 
 // Video processing constraints for Telegram
 const VIDEO_CONSTRAINTS = {
-	animated: {
-		maxWidth: 512,
-		maxHeight: 512,
-		maxDuration: 3,
-		maxFileSize: 256 * 1024, // 256KB
-		format: 'webm',
-		codec: 'libvpx-vp9'
-	},
-	video: {
-		maxWidth: 512,
-		maxHeight: 512,
-		maxDuration: 3,
-		maxFileSize: 256 * 1024, // 256KB
-		format: 'webm',
-		codec: 'libvpx-vp9'
-	},
 	sticker: {
 		maxWidth: 512,
 		maxHeight: 512,
@@ -37,7 +21,7 @@ const VIDEO_CONSTRAINTS = {
 		maxWidth: 100,
 		maxHeight: 100,
 		maxDuration: 3,
-		maxFileSize: 128 * 1024, // 128KB
+		maxFileSize: 256 * 1024, // 256KB (same as sticker per Telegram spec)
 		format: 'webm',
 		codec: 'libvpx-vp9'
 	}
@@ -187,16 +171,26 @@ function runFFmpegConversion(inputPath, outputPath, options, onProgress = null) 
 			width,
 			height,
 			crf = 30,
-			speedFilter = null
+			speedFilter = null,
+			padToExact = false // For emoji mode: pad with transparency to exact dimensions
 		} = options;
 
 		// Build video filter string
-		let videoFilters = `scale=${width}:${height},fps=30`;
+		let videoFilters;
+		if (padToExact) {
+			// For emoji: scale to fit inside dimensions (preserve aspect ratio), then pad to exact size
+			// The pad filter centers the video and fills with transparent black
+			videoFilters = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,fps=30`;
+		} else {
+			// For stickers: just scale to target dimensions
+			videoFilters = `scale=${width}:${height},fps=30`;
+		}
+
 		if (speedFilter) {
 			videoFilters += `,setpts=PTS/${speedFilter}`;
 		}
 
-		logWithContext('runFFmpeg', `Converting: ${width}x${height}, CRF ${crf}, filters: ${videoFilters}`);
+		logWithContext('runFFmpeg', `Converting: ${width}x${height}, CRF ${crf}, padToExact=${padToExact}, filters: ${videoFilters}`);
 
 		const command = ffmpeg(inputPath)
 			.outputOptions([
@@ -206,7 +200,8 @@ function runFFmpegConversion(inputPath, outputPath, options, onProgress = null) 
 				'-deadline good',
 				'-cpu-used 5',
 				'-row-mt 1',
-				'-an'
+				'-an',
+				'-pix_fmt yuva420p' // Ensure alpha channel support for transparency
 			])
 			.videoFilters(videoFilters)
 			.format('webm')
@@ -310,7 +305,7 @@ async function downloadVideoFile(ctx, fileId) {
  * Main video processing function
  * @param {Object} ctx - Telegraf context
  * @param {string} fileId - Telegram file ID
- * @param {string} [mode='sticker'] - Processing mode ('sticker', 'icon', etc.)
+ * @param {string} [mode='sticker'] - Processing mode ('sticker', 'icon', 'packs')
  * @param {function} [onProgress] - Progress callback (0-100)
  * @returns {Promise<Object>} Processing result with filePath and metadata
  */
@@ -334,17 +329,26 @@ async function processVideo(ctx, fileId, mode = 'sticker', onProgress = null) {
 		// Get metadata
 		const metadata = await getVideoMetadata(inputPath);
 
-		// Check constraints
-		const constraints = VIDEO_CONSTRAINTS[mode] || VIDEO_CONSTRAINTS.sticker;
+		// Check constraints - use 'sticker' constraints for 'packs' mode
+		const constraintKey = mode === 'icon' ? 'icon' : 'sticker';
+		const constraints = VIDEO_CONSTRAINTS[constraintKey];
 
 		if (metadata.duration > BOT_LIMITS.maxDuration) {
 			throw new Error(`Video duration (${metadata.duration.toFixed(1)}s) exceeds limit (${BOT_LIMITS.maxDuration}s)`);
 		}
 
-		// Calculate proper dimensions (one dimension must be exactly 512, other <= 512)
+		// Calculate proper dimensions based on mode
 		let targetWidth, targetHeight;
+		let padToExact = false;
 
-		if (mode === 'sticker' || mode === 'packs') {
+		if (mode === 'icon') {
+			// Emoji mode: scale to fit inside 100x100, then pad to exactly 100x100
+			// The actual scaling happens in FFmpeg filter, we just set target dimensions
+			targetWidth = constraints.maxWidth;
+			targetHeight = constraints.maxHeight;
+			padToExact = true;
+		} else {
+			// Sticker/packs mode: one dimension must be exactly 512, other <= 512
 			if (metadata.width >= metadata.height) {
 				targetWidth = 512;
 				targetHeight = Math.round((metadata.height / metadata.width) * 512);
@@ -355,9 +359,6 @@ async function processVideo(ctx, fileId, mode = 'sticker', onProgress = null) {
 
 			targetWidth = Math.min(targetWidth, 512);
 			targetHeight = Math.min(targetHeight, 512);
-		} else {
-			targetWidth = constraints.maxWidth;
-			targetHeight = constraints.maxHeight;
 		}
 
 		// Calculate target duration and speed adjustment
@@ -381,7 +382,8 @@ async function processVideo(ctx, fileId, mode = 'sticker', onProgress = null) {
 			width: targetWidth,
 			height: targetHeight,
 			crf: 30,
-			speedFilter
+			speedFilter,
+			padToExact
 		}, onProgress);
 
 		// Check output size and retry with higher compression if needed
@@ -395,7 +397,8 @@ async function processVideo(ctx, fileId, mode = 'sticker', onProgress = null) {
 				width: targetWidth,
 				height: targetHeight,
 				crf: 40,
-				speedFilter
+				speedFilter,
+				padToExact
 			}, onProgress);
 
 			outputStats = fs.statSync(outputPath);
@@ -409,7 +412,8 @@ async function processVideo(ctx, fileId, mode = 'sticker', onProgress = null) {
 				width: targetWidth,
 				height: targetHeight,
 				crf: 50,
-				speedFilter
+				speedFilter,
+				padToExact
 			}, onProgress);
 
 			outputStats = fs.statSync(outputPath);
@@ -421,6 +425,11 @@ async function processVideo(ctx, fileId, mode = 'sticker', onProgress = null) {
 
 		const processingTime = Date.now() - startTime;
 		const outputSize = outputStats.size;
+
+		// For emoji mode, final resolution is always 100x100 due to padding
+		const finalResolution = padToExact
+			? `${targetWidth}x${targetHeight}`
+			: `${targetWidth}x${targetHeight}`;
 
 		logWithContext('processVideo', `Completed: ${Math.round(outputSize / 1024)}KB output in ${processingTime}ms`);
 
@@ -437,7 +446,7 @@ async function processVideo(ctx, fileId, mode = 'sticker', onProgress = null) {
 				originalFps: metadata.frameRate,
 				finalFps: 30,
 				originalResolution: `${metadata.width}x${metadata.height}`,
-				finalResolution: `${targetWidth}x${targetHeight}`,
+				finalResolution,
 				systemOptimized: capabilities.summary.optimizedFor,
 				speedMultiplier: metadata.duration > constraints.maxDuration ?
 					metadata.duration / constraints.maxDuration : 1,
