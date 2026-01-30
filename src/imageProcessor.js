@@ -58,14 +58,17 @@ async function processImage(ctx, fileId, options) {
 
         let sharpInstance = sharp(buffer);
         
-        // Always force resize in icon mode, regardless of file type
+        // Resize based on mode
         if (options.width && options.height) {
-            console.log(`Resizing to ${options.width}x${options.height}, forceResize=${options.forceResize === true}`);
+            // Icon mode (100x100) uses cover to fill exact dimensions
+            // Sticker mode uses inside to preserve aspect ratio (one side 512px, other ≤512px)
+            const fitMode = options.forceResize ? sharp.fit.cover : sharp.fit.inside;
+            console.log(`Resizing to ${options.width}x${options.height}, fit=${fitMode === sharp.fit.cover ? 'cover' : 'inside'}`);
             sharpInstance = sharpInstance.resize({
                 width: options.width,
                 height: options.height,
-                fit: sharp.fit.cover,
-                withoutEnlargement: false  // Always resize even if smaller
+                fit: fitMode,
+                withoutEnlargement: false
             });
         }
 

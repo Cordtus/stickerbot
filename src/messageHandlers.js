@@ -658,11 +658,11 @@ async function handleMediaForPack(ctx) {
                 await ctx.reply('Processing media for your pack...');
                 
                 // Process image/sticker to standard sticker format
-                filePath = await processImageToFile(ctx, fileId, { 
-                    width: 512, 
-                    height: 462, 
-                    addBuffer: true,
-                    forceResize: true
+                // forceResize: false preserves aspect ratio (fit.inside)
+                filePath = await processImageToFile(ctx, fileId, {
+                    width: 512,
+                    height: 462,
+                    addBuffer: true
                 });
             }
             
