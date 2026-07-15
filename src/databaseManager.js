@@ -3,25 +3,12 @@
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import fs from 'fs';
+import { initializeRuntimePaths } from './runtimePaths.js';
 
-// Get the directory name correctly in ES module
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-const rootDir = path.resolve(__dirname, '..');
-const dataDir = path.join(rootDir, 'data');
+const { dataDir } = initializeRuntimePaths();
 const dbPath = path.join(dataDir, 'stickerpacks.db');
 
 console.log(`Database path: ${dbPath}`);
-
-// Ensure data dir
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-  console.log(`Created data directory: ${dataDir}`);
-} else {
-  console.log(`Data directory exists: ${dataDir}`);
-}
 
 // Database connection
 let db = null;

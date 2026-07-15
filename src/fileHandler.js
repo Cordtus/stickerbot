@@ -3,8 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
-
-const tempDir = path.join(path.dirname(new URL(import.meta.url).pathname), 'temp');
+import { tempDir } from './runtimePaths.js';
 
 function ensureTempDirectory() {
     if (!fs.existsSync(tempDir)) {

@@ -1,0 +1,23 @@
+[Unit]
+Description=Telegram StickerBot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stickerbot
+Group=stickerbot
+WorkingDirectory=/opt/stickerbot
+EnvironmentFile=/etc/stickerbot/stickerbot.env
+ExecStart=/opt/node-v22/bin/node src/bot.js
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/stickerbot/data /opt/stickerbot/temp
+
+[Install]
+WantedBy=multi-user.target

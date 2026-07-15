@@ -4,9 +4,6 @@ import https from 'https';
 import dns from 'dns';
 import { Telegraf } from 'telegraf';
 import dotenv from 'dotenv';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
 import { handleCallback } from './callbackHandlers.js';
 import {
     handlePhotoDocument,
@@ -122,13 +119,6 @@ const ipv4Agent = new https.Agent({
     maxSockets: 10,
     maxFreeSockets: 10
 });
-
-// Ensure data directory exists
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-}
 
 // Initialize bot
 const bot = new Telegraf(process.env.BOT_TOKEN, {

@@ -6,7 +6,8 @@
     "type": "module",
     "scripts": {
         "start": "node src/bot.js",
-        "dev": "nodemon src/bot.js"
+        "dev": "nodemon src/bot.js",
+        "test": "node --test"
     },
     "author": "",
     "license": "ISC",
