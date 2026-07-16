@@ -115,67 +115,39 @@ BOT_TOKEN=<production token>
 
 FFmpeg capability detection probes NVIDIA NVENC, VA-API, and platform encoders when present. The Nodev2 LXC is allowed to run without GPU passthrough: unavailable hardware probes fall back to CPU processing. Re-run the same bounded CPU smoke inside `nodev2:tgbot` with `/opt/stickerbot/scripts/smoke-production.sh` before starting the bot.
 
-### Persistent database and cutover
+### Persistent database and recovery
 
-`/opt/stickerbot/data/stickerpacks.db` is canonical persistent state. Back it up with SQLite while the writer on `cordt@pi0.lan` is stopped; do not rely on copying only the main file while a WAL may be active. First prove the prepared unit in `nodev2:tgbot` is still waiting inactive:
-
-```bash
-ssh -F /dev/null -o BatchMode=yes bv@192.168.0.170 \
-  "sudo /snap/bin/lxc exec tgbot -- sh -lc 'systemctl show -p ActiveState --value stickerbot.service | grep -qx inactive'"
-ssh -F /dev/null -o BatchMode=yes bv@192.168.0.170 \
-  'sudo /snap/bin/lxc exec tgbot -- /opt/stickerbot/scripts/smoke-production.sh'
-```
-
-For the Pi-to-Nodev2 cutover, leave the new unit inactive until code, token, FFmpeg/native dependency smoke checks, and a rehearsal database copy all pass. Then disable and stop the Pi poller so a Pi reboot cannot revive it, verify both systemd state and process state, create a uniquely named final SQLite backup without deleting earlier backups, and transfer it through this workstation:
+Production runs in `nodev2:tgbot`; `/opt/stickerbot/data/stickerpacks.db` is the canonical persistent database. Create WAL-consistent backups through SQLite rather than copying only the main file:
 
 ```bash
-ssh cordt@pi0.lan \
-  'set -eu; sudo systemctl disable --now stickerbot.service; enabled="$(systemctl is-enabled stickerbot.service 2>/dev/null || true)"; active="$(systemctl is-active stickerbot.service 2>/dev/null || true)"; printf "is-enabled=%s\nis-active=%s\n" "$enabled" "$active"; test "$enabled" = disabled; test "$active" = inactive; ! pgrep -af "[n]ode .*src/bot.js"'
-SOURCE_BACKUP="$(ssh cordt@pi0.lan '
+lxc exec nodev2:tgbot -- sh -lc '
   set -eu
-  backup="/home/cordt/stickerpacks.final.$(date -u +%Y%m%dT%H%M%SZ).db"
-  test ! -e "$backup"
-  sudo sqlite3 /opt/stickerbot/data/stickerpacks.db ".backup \"$backup\""
-  sudo chown cordt:cordt "$backup"
+  backup="/opt/stickerbot/data/stickerpacks.$(date -u +%Y%m%dT%H%M%SZ).db"
+  sqlite3 /opt/stickerbot/data/stickerpacks.db ".backup \"$backup\""
+  chown stickerbot:stickerbot "$backup"
   chmod 0600 "$backup"
   test "$(sqlite3 "$backup" "PRAGMA quick_check;")" = ok
-  printf "%s" "$backup"
-')"
-printf 'source backup retained at cordt@pi0.lan:%s\n' "$SOURCE_BACKUP"
-scp "cordt@pi0.lan:${SOURCE_BACKUP}" /tmp/stickerpacks.final.db
-ssh -F /dev/null -o BatchMode=yes bv@192.168.0.170 \
-  "sudo /snap/bin/lxc exec tgbot -- sh -c 'set -eu; umask 077; cat > /opt/stickerbot/data/stickerpacks.db.incoming'" \
-  < /tmp/stickerpacks.final.db
-ssh -F /dev/null -o BatchMode=yes bv@192.168.0.170 \
-  "sudo /snap/bin/lxc exec tgbot -- sh -lc 'set -eu; active=\"\$(systemctl is-active stickerbot.service 2>/dev/null || true)\"; test \"\$active\" = inactive; cd /opt/stickerbot/data; rm -f stickerpacks.db-wal stickerpacks.db-shm; chown stickerbot:stickerbot stickerpacks.db.incoming; chmod 0600 stickerpacks.db.incoming; test \"\$(sqlite3 stickerpacks.db.incoming \"PRAGMA quick_check;\")\" = ok; mv -f stickerpacks.db.incoming stickerpacks.db; test \"\$(sqlite3 stickerpacks.db \"PRAGMA quick_check;\")\" = ok'"
+  printf "%s\n" "$backup"
+'
 ```
 
-The target command verifies the service is inactive, removes stale target `stickerpacks.db-wal` and `stickerpacks.db-shm`, validates the incoming SQLite backup, atomically renames it into place, and validates `PRAGMA quick_check` again after the rename. Do not start the target until the Pi disabled/inactive checks above succeed. A Telegram bot token must never be held by two polling processes at once. Only after the final target database check succeeds, start exactly one poller in `nodev2:tgbot`:
+Restore only while `stickerbot.service` is stopped. Validate the incoming file, remove stale WAL/SHM sidecars, atomically rename it as `stickerbot:stickerbot` mode `0600`, validate it again, then start exactly one poller:
 
 ```bash
-ssh cordt@pi0.lan \
-  'set -eu; enabled="$(systemctl is-enabled stickerbot.service 2>/dev/null || true)"; active="$(systemctl is-active stickerbot.service 2>/dev/null || true)"; printf "is-enabled=%s\nis-active=%s\n" "$enabled" "$active"; test "$enabled" = disabled; test "$active" = inactive; ! pgrep -af "[n]ode .*src/bot.js"'
-ssh -F /dev/null -o BatchMode=yes bv@192.168.0.170 \
-  "sudo /snap/bin/lxc exec tgbot -- sh -lc 'set -eu; systemctl enable --now stickerbot.service; enabled=\"\$(systemctl is-enabled stickerbot.service)\"; active=\"\$(systemctl is-active stickerbot.service)\"; printf \"is-enabled=%s\\nis-active=%s\\n\" \"\$enabled\" \"\$active\"; test \"\$enabled\" = enabled; test \"\$active\" = active'"
+lxc exec nodev2:tgbot -- sh -lc '
+  set -eu
+  systemctl stop stickerbot.service
+  cd /opt/stickerbot/data
+  test "$(sqlite3 stickerpacks.db.incoming "PRAGMA quick_check;")" = ok
+  rm -f stickerpacks.db-wal stickerpacks.db-shm
+  chown stickerbot:stickerbot stickerpacks.db.incoming
+  chmod 0600 stickerpacks.db.incoming
+  mv -f stickerpacks.db.incoming stickerpacks.db
+  test "$(sqlite3 stickerpacks.db "PRAGMA quick_check;")" = ok
+  systemctl start stickerbot.service
+  systemctl is-active --quiet stickerbot.service
+'
 ```
-
-Verify a representative command, image conversion, and CPU video/GIF conversion while the Pi stays stopped. If target polling or conversion fails, stop and verify the target first, then restart the Pi source:
-
-```bash
-ssh -F /dev/null -o BatchMode=yes bv@192.168.0.170 \
-  "sudo /snap/bin/lxc exec tgbot -- sh -lc 'set -eu; systemctl disable --now stickerbot.service; enabled=\"\$(systemctl is-enabled stickerbot.service 2>/dev/null || true)\"; active=\"\$(systemctl is-active stickerbot.service 2>/dev/null || true)\"; printf \"is-enabled=%s\\nis-active=%s\\n\" \"\$enabled\" \"\$active\"; test \"\$enabled\" = disabled; test \"\$active\" = inactive; ! pgrep -af \"[n]ode .*src/bot.js\"'"
-ssh cordt@pi0.lan \
-  'set -eu; sudo systemctl unmask stickerbot.service; if test -f /etc/systemd/system/stickerbot.service.pre-nodev2-migration; then sudo install -o root -g root -m 0644 /etc/systemd/system/stickerbot.service.pre-nodev2-migration /etc/systemd/system/stickerbot.service; fi; sudo systemctl daemon-reload; sudo systemctl enable --now stickerbot.service; enabled="$(systemctl is-enabled stickerbot.service)"; active="$(systemctl is-active stickerbot.service)"; printf "is-enabled=%s\nis-active=%s\n" "$enabled" "$active"; test "$enabled" = enabled; test "$active" = active'
-```
-
-Restore a database only while the target is stopped: remove its stale WAL/SHM sidecars, validate the backup with `PRAGMA quick_check`, atomically rename it into place as `stickerbot:stickerbot` mode `0600`, validate it again, and then start one poller. After target acceptance, permanently mask the Pi unit and verify it remains masked and inactive across reboots:
-
-```bash
-ssh cordt@pi0.lan \
-  'set -eu; sudo systemctl disable --now stickerbot.service; fragment="$(systemctl show -p FragmentPath --value stickerbot.service)"; unit_backup=/etc/systemd/system/stickerbot.service.pre-nodev2-migration; if test "$fragment" = /etc/systemd/system/stickerbot.service && test -f "$fragment" && test ! -L "$fragment"; then if test -f "$unit_backup"; then sudo cmp -s "$fragment" "$unit_backup" || { printf "unit backup differs: %s\n" "$unit_backup" >&2; exit 1; }; sudo rm -f "$fragment"; else sudo mv "$fragment" "$unit_backup"; fi; fi; sudo systemctl daemon-reload; sudo systemctl mask stickerbot.service; enabled="$(systemctl is-enabled stickerbot.service 2>/dev/null || true)"; active="$(systemctl is-active stickerbot.service 2>/dev/null || true)"; printf "is-enabled=%s\nis-active=%s\n" "$enabled" "$active"; test "$enabled" = masked; test "$active" = inactive; ! pgrep -af "[n]ode .*src/bot.js"'
-```
-
-Retain `$SOURCE_BACKUP` on the Pi as the final source backup. Remove only the sensitive workstation copy and any obsolete target rehearsal copies after acceptance; also retain the Pi unit backup used to make the persistent mask reversible.
 
 ---
 
