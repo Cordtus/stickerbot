@@ -43,9 +43,27 @@ Thumbs.db
 CLAUDE.md
 PROJECT_BLUEPRINT.md
 .claude/
+/.codex/
+/.agents/
+/.serena/
+/docs/superpowers/
+/docs/handoffs/
+/scratch/
+/context.md
+/context-*.md
+/CONTEXT.md
+/handoff.md
+/handoff-*.md
+/HANDOFF.md
 
 # Broken/temp git directories
 .git.broken.*/
+/.tmp/
+*.tmp
+*.orig
+*.rej
+*.swp
+*.swo
 
 # Test artifacts
 stickerPacks
