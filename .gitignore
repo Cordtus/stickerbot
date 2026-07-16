@@ -42,10 +42,10 @@ Thumbs.db
 # Internal documentation (Claude-generated)
 CLAUDE.md
 PROJECT_BLUEPRINT.md
-.claude/
-/.codex/
-/.agents/
-/.serena/
+.claude
+/.codex
+/.agents
+/.serena
 /docs/superpowers/
 /docs/handoffs/
 /scratch/
