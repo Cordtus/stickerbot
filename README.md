@@ -153,8 +153,8 @@ lxc exec nodev2:tgbot -- sh -lc '
 
 ## Usage
 
-1. Start the bot on Telegram using the `/start` command.
-2. Select a mode:
+1. Send an image or a static sticker directly to receive a sticker-formatted WebP document with a 50px transparent bottom buffer. No command is required; direct media uses Sticker Format.
+2. Use `/start` only when you want to select a different mode:
     - **Emoticon Format**: Converts media to 100x100 for emotes.
     - **Sticker Format**: Converts media to 512x512 with a 50px transparent buffer.
     - **Manage Sticker Packs**: Create and manage your sticker collections.

@@ -42,13 +42,8 @@ function logWithContext(context, message, error = null) {
 // Handle photos, documents, and videos
 async function handlePhotoDocument(ctx) {
     const session = getSession(ctx.chat.id);
-    logWithContext('handlePhotoDocument', `Started with mode=${session.mode}, step=${session.packCreationStep}`);
-
-    // Require mode selection first
-    if (!session.mode) {
-        await ctx.reply('Please select a mode first using /start.');
-        return;
-    }
+    const mode = session.mode || 'sticker';
+    logWithContext('handlePhotoDocument', `Started with mode=${mode}, step=${session.packCreationStep}`);
     
     // Handle pack mode workflow
     if (session.mode === 'packs') {
@@ -112,7 +107,7 @@ async function handlePhotoDocument(ctx) {
     // WebP in icon mode (images only)
     else if (ctx.message.document && 
         ctx.message.document.mime_type === 'image/webp' && 
-        session.mode === 'icon') {
+        mode === 'icon') {
         
         await ctx.reply('Processing your WebP image, please wait...');
         
@@ -187,7 +182,7 @@ async function handlePhotoDocument(ctx) {
 
     // Handle video processing
     if (isVideo) {
-        await handleVideoProcessing(ctx, files[0], session.mode);
+        await handleVideoProcessing(ctx, files[0], mode);
         return;
     }
 
@@ -197,7 +192,7 @@ async function handlePhotoDocument(ctx) {
 
     try {
         const results = await processImages(ctx, session.images,
-            session.mode === 'icon'
+            mode === 'icon'
                 ? { width: 100, height: 100, padToExact: true }
                 : { width: 512, height: 462, addBuffer: true }
         );

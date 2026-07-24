@@ -153,8 +153,8 @@ function purgeSessions() {
     });
 }
 
-// Schedule session purging to run every hour
-setInterval(purgeSessions, 3600000); // Every 1 hour
+// Schedule session purging to run every hour without keeping the process alive.
+setInterval(purgeSessions, 3600000).unref();
 
 // Clear a user's session manually
 function clearSession(chatId) {

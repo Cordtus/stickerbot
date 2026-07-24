@@ -168,7 +168,7 @@ async function processStickerMessage(ctx) {
         const buffer = Buffer.from(response.data, 'binary');
 
         const processedBuffer = await sharp(buffer)
-            .resize({ width: 512, height: 512, fit: 'inside', withoutEnlargement: true })
+            .resize({ width: 512, height: 462, fit: 'inside', withoutEnlargement: true })
             .extend({
                 top: 0,
                 bottom: 50,
