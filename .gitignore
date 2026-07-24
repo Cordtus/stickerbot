@@ -46,6 +46,7 @@ PROJECT_BLUEPRINT.md
 /.codex
 /.agents
 /.serena
+/.worktrees/
 /docs/superpowers/
 /docs/handoffs/
 /scratch/
