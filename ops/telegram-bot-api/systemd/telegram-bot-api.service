@@ -1,0 +1,36 @@
+[Unit]
+Description=Telegram Bot API server (local mode)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=telegram-bot-api
+Group=telegram-bot-api
+EnvironmentFile=/etc/telegram-bot-api/telegram-bot-api.env
+ExecStart=/usr/local/libexec/telegram-bot-api/telegram-bot-api --local --http-ip-address=0.0.0.0 --http-port=8081 --dir=/var/lib/telegram-bot-api/state --temp-dir=/var/lib/telegram-bot-api/tmp --log=/var/log/telegram-bot-api/telegram-bot-api.log
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/telegram-bot-api/state /var/lib/telegram-bot-api/tmp /var/log/telegram-bot-api
+
+[Install]
+WantedBy=multi-user.target

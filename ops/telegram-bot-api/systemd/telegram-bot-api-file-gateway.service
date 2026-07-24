@@ -1,0 +1,35 @@
+[Unit]
+Description=Telegram Bot API token-scoped file gateway
+After=network-online.target telegram-bot-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=telegram-bot-api
+Group=telegram-bot-api
+ExecStart=/usr/local/libexec/telegram-bot-api/file-gateway --listen=0.0.0.0:8082 --state-root=/var/lib/telegram-bot-api/state
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/var/lib/telegram-bot-api/state
+
+[Install]
+WantedBy=multi-user.target

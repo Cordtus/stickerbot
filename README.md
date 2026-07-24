@@ -151,6 +151,85 @@ lxc exec nodev2:tgbot -- sh -lc '
 
 ---
 
+## Shared local Telegram Bot API on `tgbotapi`
+
+StickerBot can use the shared local Bot API only after its application
+configuration supplies `TELEGRAM_API_ROOT=http://tgbotapi.lxd:8081` (and, for
+local-mode media files, `TELEGRAM_FILE_ROOT=http://tgbotapi.lxd:8082`). Public
+Telegram remains the development default. Do not mount the Bot API state tree
+into bot containers: it contains token-scoped state for every bot.
+
+The API server, token-scoped file gateway, and bounded cache cleaner are
+packaged under `ops/telegram-bot-api`. On the `tgbotapi` container, build and
+install the Go components and units with:
+
+```bash
+cd /path/to/stickerbot/ops/telegram-bot-api
+sudo bash install.sh
+```
+
+The installer creates the `telegram-bot-api` service account and private state
+directories, builds `file-gateway` and `cache-cleaner`, installs the four units,
+and runs `systemctl daemon-reload`. It deliberately does **not** start or enable
+any unit, and it never creates, reads, or overwrites
+`/etc/telegram-bot-api/telegram-bot-api.env`. Install the audited native Bot API
+binary separately at `/usr/local/libexec/telegram-bot-api/telegram-bot-api`.
+
+Create the credential file manually, as root, before enabling the API. It is
+root-only and contains the Telegram application credentials, never a bot token:
+
+```bash
+sudo install -d -m 0700 /etc/telegram-bot-api
+sudoedit /etc/telegram-bot-api/telegram-bot-api.env
+sudo chown root:root /etc/telegram-bot-api/telegram-bot-api.env
+sudo chmod 0600 /etc/telegram-bot-api/telegram-bot-api.env
+```
+
+```env
+TELEGRAM_API_ID=<api id>
+TELEGRAM_API_HASH=<api hash>
+```
+
+State and temporary files live in mode-`0700`
+`/var/lib/telegram-bot-api/{state,tmp}`; service logs are in mode-`0750`
+`/var/log/telegram-bot-api`. The API and gateway intentionally listen on
+`0.0.0.0:8081` and `0.0.0.0:8082` for the LXD network only. Keep those ports
+off the public network. The gateway validates the calling token's native state
+directory and does not log tokens or absolute file paths.
+
+### Cache retention and activation
+
+`telegram-bot-api-cache-cleaner.timer` runs hourly, serialized through
+`/usr/bin/flock`. Initially its service runs only with `--dry-run`; review the
+sanitized numeric bot-ID usage and planned reclaim figures before permitting
+deletion:
+
+```bash
+sudo systemctl start telegram-bot-api-cache-cleaner.service
+sudo journalctl -u telegram-bot-api-cache-cleaner.service --since '-10 min'
+```
+
+The cleaner removes only regular temporary files older than six hours and
+regular downloaded media older than 24 hours in allowlisted Telegram media
+directories. It never follows symlinks or removes TDLib databases, binlogs,
+configuration, logs, or unknown state files. At 100 GiB of managed media it
+prunes the oldest eligible media toward 80 GiB, while protecting media younger
+than two hours.
+
+After reviewing dry-run candidates against the live layout, remove `--dry-run`
+from `/etc/systemd/system/telegram-bot-api-cache-cleaner.service`, then reload
+and activate the timer:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now telegram-bot-api-cache-cleaner.timer
+```
+
+Do not enable destructive cleanup until a current state backup has passed its
+SQLite/TDLib validation and dry-run output contains only expected media paths.
+
+---
+
 ## Usage
 
 1. Send an image or a static sticker directly to receive a sticker-formatted WebP document with a 50px transparent bottom buffer. No command is required; direct media uses Sticker Format.
