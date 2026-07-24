@@ -1,0 +1,31 @@
+[Unit]
+Description=Telegram Bot API cache retention cleanup (report-only initially)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=telegram-bot-api
+Group=telegram-bot-api
+RuntimeDirectory=telegram-bot-api
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/flock -n /run/telegram-bot-api/cache-cleaner.lock /usr/local/libexec/telegram-bot-api/cache-cleaner --dry-run
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/telegram-bot-api/state /var/lib/telegram-bot-api/tmp
