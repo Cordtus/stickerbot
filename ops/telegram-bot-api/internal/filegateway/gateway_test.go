@@ -106,6 +106,59 @@ func TestGatewayRejectsTraversalAndSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestOpenValidatedTokenFileRejectsEscapes(t *testing.T) {
+	stateRoot := t.TempDir()
+	ownerRoot := filepath.Join(stateRoot, ownerToken)
+	otherFile := writeStateFile(t, stateRoot, otherToken, "videos/other.mp4", []byte("other media"))
+	if err := os.MkdirAll(filepath.Join(ownerRoot, "videos"), 0o700); err != nil {
+		t.Fatalf("create owner videos directory: %v", err)
+	}
+	if err := os.Symlink(otherFile, filepath.Join(ownerRoot, "videos", "escaped.mp4")); err != nil {
+		t.Fatalf("create escaping symlink: %v", err)
+	}
+
+	tokenInfo, err := os.Stat(ownerRoot)
+	if err != nil {
+		t.Fatalf("stat owner root: %v", err)
+	}
+
+	file, err := openValidatedTokenFile(ownerRoot, tokenInfo, "videos/escaped.mp4")
+	if file != nil {
+		file.Close()
+		t.Fatal("open escaping symlink succeeded")
+	}
+	if err == nil {
+		t.Fatal("open escaping symlink error = nil, want error")
+	}
+}
+
+func TestOpenValidatedTokenFileRejectsReplacedTokenRoot(t *testing.T) {
+	stateRoot := t.TempDir()
+	ownerRoot := filepath.Join(stateRoot, ownerToken)
+	writeStateFile(t, stateRoot, ownerToken, "videos/owned.mp4", []byte("owned media"))
+	writeStateFile(t, stateRoot, otherToken, "videos/other.mp4", []byte("other media"))
+
+	tokenInfo, err := os.Stat(ownerRoot)
+	if err != nil {
+		t.Fatalf("stat owner root: %v", err)
+	}
+	if err := os.Rename(ownerRoot, ownerRoot+"-original"); err != nil {
+		t.Fatalf("move owner root: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(stateRoot, otherToken), ownerRoot); err != nil {
+		t.Fatalf("replace owner root with symlink: %v", err)
+	}
+
+	file, err := openValidatedTokenFile(ownerRoot, tokenInfo, "videos/other.mp4")
+	if file != nil {
+		file.Close()
+		t.Fatal("open through replaced token root succeeded")
+	}
+	if err == nil {
+		t.Fatal("open through replaced token root error = nil, want error")
+	}
+}
+
 func TestGatewayRejectsDirectoriesAndIncompleteFiles(t *testing.T) {
 	stateRoot := t.TempDir()
 	ownerRoot := filepath.Join(stateRoot, ownerToken)

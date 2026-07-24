@@ -104,12 +104,17 @@ func (h *handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		response.WriteHeader(http.StatusForbidden)
 		return
 	}
+	fileName, err := filepath.Rel(tokenRoot, filePath)
+	if err != nil {
+		response.WriteHeader(http.StatusNotFound)
+		return
+	}
 	if strings.HasSuffix(filepath.Base(filePath), ".part") {
 		response.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	file, err := os.Open(filePath)
+	file, err := openValidatedTokenFile(tokenRoot, tokenInfo, fileName)
 	if err != nil {
 		response.WriteHeader(http.StatusNotFound)
 		return
@@ -123,6 +128,24 @@ func (h *handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	http.ServeContent(response, request, filepath.Base(filePath), info.ModTime(), file)
+}
+
+func openValidatedTokenFile(tokenRoot string, tokenInfo os.FileInfo, fileName string) (*os.File, error) {
+	root, err := os.OpenRoot(tokenRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+
+	rootInfo, err := root.Stat(".")
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(tokenInfo, rootInfo) {
+		return nil, os.ErrNotExist
+	}
+
+	return root.Open(fileName)
 }
 
 type responseRecorder struct {
