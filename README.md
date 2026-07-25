@@ -159,6 +159,11 @@ local-mode media files, `TELEGRAM_FILE_ROOT=http://tgbotapi.lxd:8082`). Public
 Telegram remains the development default. Do not mount the Bot API state tree
 into bot containers: it contains token-scoped state for every bot.
 
+For a production StickerBot service, set both roots in its environment. The
+file root is required only when the local API returns absolute `file_path`
+values; relative paths retain Telegraf's public file-link behavior. Keep
+`BOT_TOKEN` in the service environment and never put it in either root.
+
 The API server, token-scoped file gateway, and bounded cache cleaner are
 packaged under `ops/telegram-bot-api`. On the `tgbotapi` container, build and
 install the Go components and units with:

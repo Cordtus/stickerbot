@@ -3,9 +3,11 @@
 import ffmpeg from 'fluent-ffmpeg';
 import fs from 'fs';
 import path from 'path';
+import { pipeline } from 'node:stream/promises';
 import axios from 'axios';
 import { ensureTempDirectory, tempDir } from './fileHandler.js';
 import { getSystemSpec } from './configurator.js';
+import { formatTelegramDownloadError, resolveTelegramFile } from './telegramFiles.js';
 
 // Video processing constraints for Telegram
 const VIDEO_CONSTRAINTS = {
@@ -250,16 +252,17 @@ function runFFmpegConversion(inputPath, outputPath, options, onProgress = null) 
  * @param {string} fileId - Telegram file ID
  * @returns {Promise<string>} Downloaded file path
  */
-async function downloadVideoFile(ctx, fileId) {
+async function downloadVideoFile(ctx, fileId, options = {}) {
 	const timestamp = Date.now();
 	const randomSuffix = Math.random().toString(36).substring(2, 8);
 	const tempFilePath = path.join(tempDir, `download-${timestamp}-${randomSuffix}`);
+	const timeoutMs = options.timeoutMs ?? 60000;
 
 	try {
 		ensureTempDirectory();
 
-		const fileInfo = await ctx.telegram.getFile(fileId);
-		const fileSize = fileInfo.file_size;
+		const { file, url } = await resolveTelegramFile(ctx, fileId);
+		const fileSize = file.file_size;
 
 		logWithContext('downloadVideoFile', `Downloading ${Math.round(fileSize / 1024)}KB to ${tempFilePath}`);
 
@@ -267,29 +270,27 @@ async function downloadVideoFile(ctx, fileId) {
 			throw new Error(`File too large: ${Math.round(fileSize / 1024 / 1024)}MB (max: ${BOT_LIMITS.maxFileSize / 1024 / 1024}MB)`);
 		}
 
-		const fileUrl = await ctx.telegram.getFileLink(fileId);
-		const response = await axios({
-			method: 'GET',
-			url: fileUrl,
-			responseType: 'stream',
-			timeout: 60000
-		});
-
-		const writer = fs.createWriteStream(tempFilePath);
-		response.data.pipe(writer);
-
-		await new Promise((resolve, reject) => {
-			writer.on('finish', resolve);
-			writer.on('error', reject);
-
-			const dlTimeout = setTimeout(() => {
-				writer.destroy();
-				reject(new Error('Download timeout'));
-			}, 60000);
-
-			writer.on('finish', () => clearTimeout(dlTimeout));
-			writer.on('error', () => clearTimeout(dlTimeout));
-		});
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), timeoutMs);
+		try {
+			const response = await axios({
+				method: 'GET',
+				url,
+				responseType: 'stream',
+				timeout: timeoutMs,
+				signal: controller.signal
+			});
+			await pipeline(response.data, fs.createWriteStream(tempFilePath), {
+				signal: controller.signal
+			});
+		} catch (error) {
+			const safeError = controller.signal.aborted
+				? { name: 'TimeoutError', code: 'ETIMEDOUT' }
+				: error;
+			throw new Error(`Download failed: ${formatTelegramDownloadError(safeError)}`);
+		} finally {
+			clearTimeout(timeout);
+		}
 
 		logWithContext('downloadVideoFile', `Download completed: ${tempFilePath}`);
 		return tempFilePath;
@@ -297,7 +298,7 @@ async function downloadVideoFile(ctx, fileId) {
 		if (fs.existsSync(tempFilePath)) {
 			fs.unlinkSync(tempFilePath);
 		}
-		throw new Error(`Download failed: ${err.message}`);
+		throw err.message.startsWith('Download failed:') ? err : new Error(`Download failed: ${err.message}`);
 	}
 }
 

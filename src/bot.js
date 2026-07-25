@@ -1,5 +1,6 @@
 // bot.js
 
+import http from 'http';
 import https from 'https';
 import dns from 'dns';
 import { Telegraf } from 'telegraf';
@@ -18,11 +19,13 @@ import {
 } from './commandHandlers.js';
 import { initDatabase } from './databaseManager.js';
 import { getSystemSpec } from './configurator.js';
-
-dns.setDefaultResultOrder('ipv4first');
+import { applyTelegramAgent, createTelegramAgent, createTelegramConfig } from './telegramConfig.js';
 
 // Load environment variables
 dotenv.config();
+
+dns.setDefaultResultOrder('ipv4first');
+const telegramConfig = createTelegramConfig();
 
 // Enhanced logger
 function logWithContext(context, message, error = null) {
@@ -35,17 +38,13 @@ function logWithContext(context, message, error = null) {
 }
 
 async function testNetworkConnectivity() {
-    const { promisify } = await import('util');
-    const lookup = promisify(dns.lookup);
-    
     try {
         logWithContext('network', 'Testing connectivity...');
-        const result = await lookup('api.telegram.org', { family: 4 });
-        
-        // Test basic HTTPS connection
         await new Promise((resolve, reject) => {
-            const req = https.get('https://api.telegram.org/', {
+            const requestClient = new URL(telegramConfig.connectivityUrl).protocol === 'http:' ? http : https;
+            const req = requestClient.get(telegramConfig.connectivityUrl, {
                 family: 4,
+                agent: telegramConfig.agent,
                 timeout: 10000
             }, (res) => {
                 res.on('data', () => {});
@@ -75,10 +74,12 @@ async function testBotToken() {
     logWithContext('bot', 'Validating bot token...');
     
     return new Promise((resolve, reject) => {
-        const url = `https://api.telegram.org/bot${process.env.BOT_TOKEN}/getMe`;
+        const url = new URL(`bot${process.env.BOT_TOKEN}/getMe`, `${telegramConfig.apiRoot}/`);
+        const requestClient = url.protocol === 'http:' ? http : https;
         
-        const req = https.get(url, {
+        const req = requestClient.get(url, {
             family: 4,
+            agent: telegramConfig.agent,
             timeout: 15000
         }, (res) => {
             let data = '';
@@ -110,25 +111,16 @@ async function testBotToken() {
     });
 }
 
-// Create IPv4 HTTPS agent
-const ipv4Agent = new https.Agent({
-    family: 4,           // Force IPv4
-    keepAlive: true,
-    keepAliveMsecs: 30000,
-    timeout: 30000,
-    maxSockets: 10,
-    maxFreeSockets: 10
-});
-
 // Initialize bot
 const bot = new Telegraf(process.env.BOT_TOKEN, {
     telegram: {
-        agent: ipv4Agent,
-        apiRoot: 'https://api.telegram.org',
+        agent: telegramConfig.agent,
+        apiRoot: telegramConfig.apiRoot,
         webhookReply: false
     },
     handlerTimeout: 120000  // 2 minutes for video processing
 });
+applyTelegramAgent(bot.telegram, telegramConfig);
 
 // Initialize database and system detection
 initDatabase().then(async () => {
@@ -265,8 +257,7 @@ async function startBot() {
                 
                 // Try with fresh agent on retry
                 if (retries <= 2) {
-                    bot.telegram.options.agent = new https.Agent({
-                        family: 4,
+                    bot.telegram.options.agent = createTelegramAgent(telegramConfig.apiRoot, {
                         keepAlive: false,
                         timeout: 60000
                     });
