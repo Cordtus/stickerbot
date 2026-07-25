@@ -5,14 +5,14 @@ import axios from 'axios';
 import path from 'path';
 import fs from 'fs';
 import { ensureTempDirectory, tempDir } from './fileHandler.js';
+import { formatTelegramDownloadError, resolveTelegramFile } from './telegramFiles.js';
 
 const SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
 
 // Validate file type and size using Telegram's file info API
-async function validateImage(ctx, fileId) {
+function validateImage(fileInfo) {
     try {
-        const fileInfo = await ctx.telegram.getFile(fileId);
-        console.log(`Validating file: fileId=${fileId}, size=${fileInfo.file_size}`);
+        console.log(`Validating image file size=${fileInfo.file_size}`);
 
         if (fileInfo.file_size > SIZE_LIMIT) {
             throw new Error(`File size exceeds the limit of ${SIZE_LIMIT / (1024 * 1024)} MB. Please compress the file and try again.`);
@@ -43,10 +43,14 @@ async function validateImageMetadata(buffer) {
 
 // Download file from Telegram
 async function downloadFile(ctx, fileId) {
-    const fileInfo = await validateImage(ctx, fileId);
-    const fileLink = await ctx.telegram.getFileLink(fileId);
-    const response = await axios({ url: fileLink, responseType: 'arraybuffer' });
-    return Buffer.from(response.data, 'binary');
+    const { file, url } = await resolveTelegramFile(ctx, fileId);
+    validateImage(file);
+    try {
+        const response = await axios({ url, responseType: 'arraybuffer' });
+        return Buffer.from(response.data, 'binary');
+    } catch (error) {
+        throw new Error(`Download failed: ${formatTelegramDownloadError(error)}`);
+    }
 }
 
 // Process an individual image with dynamic options
@@ -163,9 +167,7 @@ async function processStickerMessage(ctx) {
             throw new Error('Sticker file ID is missing. Please resend the sticker.');
         }
 
-        const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
-        const response = await axios({ url: fileLink, responseType: 'arraybuffer' });
-        const buffer = Buffer.from(response.data, 'binary');
+        const buffer = await downloadFile(ctx, sticker.file_id);
 
         const processedBuffer = await sharp(buffer)
             .resize({ width: 512, height: 462, fit: 'inside', withoutEnlargement: true })

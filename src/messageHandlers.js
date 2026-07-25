@@ -28,6 +28,7 @@ import {
 import { extractStickerSetName } from './utils.js';
 import { ensureTempDirectory, tempDir } from './fileHandler.js';
 import { getSystemSpec } from './configurator.js';
+import { fetchTelegramFile } from './telegramFiles.js';
 
 // Enhanced logger that provides context
 function logWithContext(context, message, error = null) {
@@ -114,11 +115,7 @@ async function handlePhotoDocument(ctx) {
         try {
             // Get file details
             const fileId = ctx.message.document.file_id;
-            const fileLink = await ctx.telegram.getFileLink(fileId);
-            
-            // Download using fetch
-            const response = await fetch(fileLink);
-            const buffer = Buffer.from(await response.arrayBuffer());
+            const { buffer } = await fetchTelegramFile(ctx, fileId);
             
             // Resize to fit inside 100x100, pad with transparency to exact dimensions
             const processedBuffer = await sharp(buffer)
@@ -462,11 +459,7 @@ async function handleSticker(ctx) {
             
             // Get file details
             const fileId = ctx.message.sticker.file_id;
-            const fileLink = await ctx.telegram.getFileLink(fileId);
-            
-            // Download using fetch
-            const response = await fetch(fileLink);
-            const buffer = Buffer.from(await response.arrayBuffer());
+            const { buffer } = await fetchTelegramFile(ctx, fileId);
             
             // Resize to fit inside 100x100, pad with transparency to exact dimensions
             const processedBuffer = await sharp(buffer)
