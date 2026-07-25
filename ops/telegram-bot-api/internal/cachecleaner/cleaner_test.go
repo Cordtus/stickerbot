@@ -248,6 +248,80 @@ func TestCleanerStopsBeforeDeletionWhenContextIsCancelled(t *testing.T) {
 	assertExists(t, expired)
 }
 
+func TestRemoveCandidateRejectsReplacedTemporaryRoot(t *testing.T) {
+	now := time.Date(2026, time.July, 24, 12, 0, 0, 0, time.UTC)
+	_, tempRoot := newRoots(t)
+	candidatePath := writeFile(t, tempRoot, "downloads/expired.part", 3, now.Add(-7*time.Hour))
+	rootInfo, err := os.Stat(tempRoot)
+	if err != nil {
+		t.Fatalf("stat temporary root: %v", err)
+	}
+	info, err := os.Lstat(candidatePath)
+	if err != nil {
+		t.Fatalf("lstat temporary candidate: %v", err)
+	}
+	replacementRoot := filepath.Join(t.TempDir(), "replacement")
+	replacementFile := writeFile(t, replacementRoot, "downloads/expired.part", 3, now.Add(-7*time.Hour))
+	if err := os.Rename(tempRoot, tempRoot+"-original"); err != nil {
+		t.Fatalf("move temporary root: %v", err)
+	}
+	if err := os.Symlink(replacementRoot, tempRoot); err != nil {
+		t.Fatalf("replace temporary root: %v", err)
+	}
+
+	err = removeCandidate(candidate{
+		path:         candidatePath,
+		rootPath:     tempRoot,
+		relativePath: filepath.Join("downloads", "expired.part"),
+		rootInfo:     rootInfo,
+		size:         info.Size(),
+		modifiedAt:   info.ModTime(),
+		kind:         temporaryFile,
+	})
+	if err == nil {
+		t.Fatal("removeCandidate() error = nil, want replaced-root rejection")
+	}
+	assertExists(t, replacementFile)
+}
+
+func TestRemoveCandidateRejectsEscapingMediaParentReplacement(t *testing.T) {
+	now := time.Date(2026, time.July, 24, 12, 0, 0, 0, time.UTC)
+	stateRoot, _ := newRoots(t)
+	tokenRoot := filepath.Join(stateRoot, testToken)
+	candidatePath := writeFile(t, tokenRoot, "videos/expired.mp4", 3, now.Add(-25*time.Hour))
+	foreignFile := writeFile(t, tokenRoot, filepath.Join("private-cache", "expired.mp4"), 3, now.Add(-25*time.Hour))
+	mediaRoot := filepath.Join(tokenRoot, "videos")
+	rootInfo, err := os.Stat(mediaRoot)
+	if err != nil {
+		t.Fatalf("stat media root: %v", err)
+	}
+	info, err := os.Lstat(candidatePath)
+	if err != nil {
+		t.Fatalf("lstat media candidate: %v", err)
+	}
+	if err := os.Rename(mediaRoot, mediaRoot+"-original"); err != nil {
+		t.Fatalf("move media root: %v", err)
+	}
+	if err := os.Symlink("private-cache", mediaRoot); err != nil {
+		t.Fatalf("replace media root: %v", err)
+	}
+
+	err = removeCandidate(candidate{
+		path:         candidatePath,
+		rootPath:     mediaRoot,
+		relativePath: "expired.mp4",
+		rootInfo:     rootInfo,
+		botID:        "123456",
+		size:         info.Size(),
+		modifiedAt:   info.ModTime(),
+		kind:         mediaFile,
+	})
+	if err == nil {
+		t.Fatal("removeCandidate() error = nil, want escaping-parent rejection")
+	}
+	assertExists(t, foreignFile)
+}
+
 func TestCleanerErrorsDoNotLeakBotTokensOrPaths(t *testing.T) {
 	stateRoot := t.TempDir()
 	sensitiveRoot := filepath.Join(stateRoot, testToken)

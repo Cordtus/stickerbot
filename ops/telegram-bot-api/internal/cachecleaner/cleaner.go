@@ -84,11 +84,14 @@ const (
 )
 
 type candidate struct {
-	path       string
-	botID      string
-	size       int64
-	modifiedAt time.Time
-	kind       candidateKind
+	path         string
+	rootPath     string
+	relativePath string
+	rootInfo     os.FileInfo
+	botID        string
+	size         int64
+	modifiedAt   time.Time
+	kind         candidateKind
 }
 
 // Clean removes only regular files from the configured temporary root and
@@ -132,8 +135,8 @@ func Clean(ctx context.Context, policy Policy, now time.Time) (Report, error) {
 			return report, err
 		}
 		if !policy.DryRun {
-			if err := os.Remove(file.path); err != nil {
-				return report, fmt.Errorf("remove %s cache candidate: %w", candidateScope(file), filesystemCause(err))
+			if err := removeCandidate(file); err != nil {
+				return report, err
 			}
 		}
 		report.Removed++
@@ -177,8 +180,15 @@ func validateRoot(root string) error {
 }
 
 func scanTemporary(ctx context.Context, root string) ([]candidate, error) {
+	rootInfo, err := os.Lstat(root)
+	if err != nil {
+		return nil, fmt.Errorf("scan temporary root: %w", filesystemCause(err))
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+		return nil, fmt.Errorf("temporary root changed during scan")
+	}
 	files := make([]candidate, 0)
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if err := contextErr(ctx); err != nil {
 			return err
 		}
@@ -195,7 +205,19 @@ func scanTemporary(ctx context.Context, root string) ([]candidate, error) {
 		if !info.Mode().IsRegular() {
 			return nil
 		}
-		files = append(files, candidate{path: path, size: info.Size(), modifiedAt: info.ModTime(), kind: temporaryFile})
+		relativePath, err := candidateRelativePath(root, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, candidate{
+			path:         path,
+			rootPath:     root,
+			relativePath: relativePath,
+			rootInfo:     rootInfo,
+			size:         info.Size(),
+			modifiedAt:   info.ModTime(),
+			kind:         temporaryFile,
+		})
 		return nil
 	})
 	if err != nil {
@@ -229,6 +251,13 @@ func scanMedia(ctx context.Context, root string) ([]candidate, error) {
 }
 
 func scanTokenMedia(ctx context.Context, tokenRoot, botID string) ([]candidate, error) {
+	tokenInfo, err := os.Lstat(tokenRoot)
+	if err != nil {
+		return nil, fmt.Errorf("read state for bot %s: %w", botID, filesystemCause(err))
+	}
+	if tokenInfo.Mode()&os.ModeSymlink != 0 || !tokenInfo.IsDir() {
+		return nil, fmt.Errorf("read state for bot %s: not a directory", botID)
+	}
 	entries, err := os.ReadDir(tokenRoot)
 	if err != nil {
 		return nil, fmt.Errorf("read state for bot %s: %w", botID, filesystemCause(err))
@@ -245,7 +274,14 @@ func scanTokenMedia(ctx context.Context, tokenRoot, botID string) ([]candidate, 
 			continue
 		}
 		mediaRoot := filepath.Join(tokenRoot, entry.Name())
-		err := filepath.WalkDir(mediaRoot, func(path string, child fs.DirEntry, walkErr error) error {
+		mediaInfo, err := os.Lstat(mediaRoot)
+		if err != nil {
+			return nil, fmt.Errorf("inspect media for bot %s: %w", botID, filesystemCause(err))
+		}
+		if mediaInfo.Mode()&os.ModeSymlink != 0 || !mediaInfo.IsDir() {
+			return nil, fmt.Errorf("media root changed for bot %s", botID)
+		}
+		err = filepath.WalkDir(mediaRoot, func(path string, child fs.DirEntry, walkErr error) error {
 			if err := contextErr(ctx); err != nil {
 				return err
 			}
@@ -262,7 +298,20 @@ func scanTokenMedia(ctx context.Context, tokenRoot, botID string) ([]candidate, 
 			if !info.Mode().IsRegular() {
 				return nil
 			}
-			files = append(files, candidate{path: path, botID: botID, size: info.Size(), modifiedAt: info.ModTime(), kind: mediaFile})
+			relativePath, err := candidateRelativePath(mediaRoot, path)
+			if err != nil {
+				return err
+			}
+			files = append(files, candidate{
+				path:         path,
+				rootPath:     mediaRoot,
+				relativePath: relativePath,
+				rootInfo:     mediaInfo,
+				botID:        botID,
+				size:         info.Size(),
+				modifiedAt:   info.ModTime(),
+				kind:         mediaFile,
+			})
 			return nil
 		})
 		if err != nil {
@@ -354,15 +403,78 @@ func preflightCandidates(ctx context.Context, candidates []candidate) error {
 		if err := contextErr(ctx); err != nil {
 			return err
 		}
-		info, err := os.Lstat(file.path)
+		root, err := openCandidateRoot(file)
 		if err != nil {
 			return fmt.Errorf("recheck %s cache candidate: %w", candidateScope(file), filesystemCause(err))
 		}
-		if !info.Mode().IsRegular() || info.Size() != file.size || !info.ModTime().Equal(file.modifiedAt) {
-			return fmt.Errorf("cache candidate changed during scan")
+		err = recheckCandidate(root, file)
+		closeErr := root.Close()
+		if err != nil {
+			return fmt.Errorf("recheck %s cache candidate: %w", candidateScope(file), filesystemCause(err))
+		}
+		if closeErr != nil {
+			return fmt.Errorf("recheck %s cache candidate: %w", candidateScope(file), filesystemCause(closeErr))
 		}
 	}
 	return nil
+}
+
+func removeCandidate(file candidate) error {
+	root, err := openCandidateRoot(file)
+	if err != nil {
+		return fmt.Errorf("remove %s cache candidate: %w", candidateScope(file), filesystemCause(err))
+	}
+	defer root.Close()
+
+	if err := recheckCandidate(root, file); err != nil {
+		return fmt.Errorf("remove %s cache candidate: %w", candidateScope(file), filesystemCause(err))
+	}
+	if err := root.Remove(file.relativePath); err != nil {
+		return fmt.Errorf("remove %s cache candidate: %w", candidateScope(file), filesystemCause(err))
+	}
+	return nil
+}
+
+func openCandidateRoot(file candidate) (*os.Root, error) {
+	if file.rootInfo == nil || !filepath.IsLocal(file.relativePath) || file.relativePath == "." {
+		return nil, errors.New("invalid cache candidate root")
+	}
+	root, err := os.OpenRoot(file.rootPath)
+	if err != nil {
+		return nil, err
+	}
+	rootInfo, err := root.Stat(".")
+	if err != nil {
+		root.Close()
+		return nil, err
+	}
+	if !os.SameFile(file.rootInfo, rootInfo) {
+		root.Close()
+		return nil, errors.New("cache candidate root changed during scan")
+	}
+	return root, nil
+}
+
+func recheckCandidate(root *os.Root, file candidate) error {
+	info, err := root.Lstat(file.relativePath)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() != file.size || !info.ModTime().Equal(file.modifiedAt) {
+		return errors.New("cache candidate changed during scan")
+	}
+	return nil
+}
+
+func candidateRelativePath(root, path string) (string, error) {
+	relativePath, err := filepath.Rel(root, path)
+	if err != nil {
+		return "", err
+	}
+	if relativePath == "." || !filepath.IsLocal(relativePath) {
+		return "", fmt.Errorf("cache candidate is outside its root")
+	}
+	return relativePath, nil
 }
 
 func contextErr(ctx context.Context) error {
