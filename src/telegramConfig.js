@@ -37,6 +37,10 @@ function createTelegramAgent(apiRoot, options = {}) {
 	});
 }
 
+function buildTelegramMethodUrl(apiRoot, token, method) {
+	return new URL(`/bot${token}/${method}`, `${apiRoot}/`);
+}
+
 function createTelegramConfig(environment = process.env) {
 	const apiRoot = normalizeRoot(environment.TELEGRAM_API_ROOT || publicApiRoot, 'TELEGRAM_API_ROOT');
 	const fileRoot = environment.TELEGRAM_FILE_ROOT
@@ -61,6 +65,7 @@ function applyTelegramAgent(telegram, config) {
 
 export {
 	applyTelegramAgent,
+	buildTelegramMethodUrl,
 	createTelegramAgent,
 	createTelegramConfig,
 };

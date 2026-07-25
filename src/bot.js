@@ -19,7 +19,12 @@ import {
 } from './commandHandlers.js';
 import { initDatabase } from './databaseManager.js';
 import { getSystemSpec } from './configurator.js';
-import { applyTelegramAgent, createTelegramAgent, createTelegramConfig } from './telegramConfig.js';
+import {
+    applyTelegramAgent,
+    buildTelegramMethodUrl,
+    createTelegramAgent,
+    createTelegramConfig
+} from './telegramConfig.js';
 
 // Load environment variables
 dotenv.config();
@@ -74,7 +79,7 @@ async function testBotToken() {
     logWithContext('bot', 'Validating bot token...');
     
     return new Promise((resolve, reject) => {
-        const url = new URL(`bot${process.env.BOT_TOKEN}/getMe`, `${telegramConfig.apiRoot}/`);
+        const url = buildTelegramMethodUrl(telegramConfig.apiRoot, process.env.BOT_TOKEN, 'getMe');
         const requestClient = url.protocol === 'http:' ? http : https;
         
         const req = requestClient.get(url, {
