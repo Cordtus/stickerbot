@@ -3,7 +3,11 @@ import http from 'node:http';
 import https from 'node:https';
 import test from 'node:test';
 import { Telegram } from 'telegraf';
-import { applyTelegramAgent, createTelegramConfig } from '../src/telegramConfig.js';
+import {
+	applyTelegramAgent,
+	buildTelegramMethodUrl,
+	createTelegramConfig,
+} from '../src/telegramConfig.js';
 
 test('Telegram API defaults to the public HTTPS endpoint', () => {
 	const config = createTelegramConfig({});
@@ -55,6 +59,19 @@ test('Telegram API rejects roots with credentials, queries, or unsupported proto
 			assert.throws(() => createTelegramConfig({ [variable]: root }), new RegExp(variable));
 		}
 	}
+});
+
+test('Telegram method URLs preserve bot tokens containing a colon', () => {
+	const url = buildTelegramMethodUrl(
+		'http://telegram-api.internal:8081',
+		'12345:test-token',
+		'getMe',
+	);
+
+	assert.equal(
+		url.toString(),
+		'http://telegram-api.internal:8081/bot12345:test-token/getMe',
+	);
 });
 
 test('local HTTP Telegram calls retain the configured agent after Telegraf construction', async (t) => {
