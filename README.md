@@ -26,7 +26,8 @@ Bot to process images, videos, and GIFs into Telegram-compatible sticker formats
 
 ### Requirements
 
-- **Node.js**
+- **Node.js** (22 in production)
+- **Bun** (package manager)
 - Telegram Bot Token (obtainable via [BotFather](https://core.telegram.org/bots#botfather))
 - SQLite3
 - **FFmpeg** (for video/GIF processing)
@@ -45,7 +46,7 @@ Bot to process images, videos, and GIFs into Telegram-compatible sticker formats
 2. Install dependencies:
 
     ```bash
-    yarn install
+    bun install
     ```
 
 3. **Install FFmpeg** (for video support):
@@ -73,13 +74,13 @@ Bot to process images, videos, and GIFs into Telegram-compatible sticker formats
 5. Start:
 
     ```bash
-    yarn start
+    bun run start
     ```
 
    For development (auto-reload on code changes):
 
    ```bash
-   yarn dev
+   bun run dev
    ```
 
 ---
@@ -88,15 +89,18 @@ Bot to process images, videos, and GIFs into Telegram-compatible sticker formats
 
 Production runs as the dedicated `stickerbot` account from `/opt/stickerbot`. Code, scripts, `node_modules`, and the service unit are root-owned and immutable to the bot. Only `/opt/stickerbot/data` and `/opt/stickerbot/temp` are private writable directories for `stickerbot` (mode `0700`, with service-created files restricted further by `UMask=0077`).
 
-Install the target-native runtime and media/native build dependencies first. `/opt/node-v22` must contain the x86-64 Node.js 22 distribution; do not copy the Raspberry Pi Node runtime, `node_modules`, npm cache, or Sharp/SQLite native binaries.
+Install the target-native runtime and media/native build dependencies first. `/opt/node-v22` must contain the x86-64 Node.js 22 distribution and `/opt/bun/bin/bun` the Bun package manager; do not copy the Raspberry Pi Node runtime, `node_modules`, Bun cache, or Sharp/SQLite native binaries.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates ffmpeg build-essential python3 pkg-config sqlite3
+sudo apt-get install -y ca-certificates ffmpeg build-essential python3 pkg-config sqlite3 unzip
+curl -fsSLo /tmp/bun-install.sh https://bun.sh/install
+sudo BUN_INSTALL=/opt/bun bash /tmp/bun-install.sh "bun-v1.4.2"
+rm -f /tmp/bun-install.sh
 sudo bash scripts/install-production.sh
 ```
 
-The installer checks `ffmpeg` and `ffprobe`, runs a bounded local VP9 conversion/probe through `scripts/smoke-production.sh`, runs `/opt/node-v22/bin/npm ci --omit=dev`, and imports `sharp` and `sqlite3` with the target Node binary. It installs `/etc/systemd/system/stickerbot.service` but deliberately does not enable or start it. This keeps the target poller waiting inactive while the source poller remains live.
+The installer checks `ffmpeg` and `ffprobe`, runs a bounded local VP9 conversion/probe through `scripts/smoke-production.sh`, runs `/opt/bun/bin/bun install --production --frozen-lockfile`, and imports `sharp` and `sqlite3` with the target Node binary. It installs `/etc/systemd/system/stickerbot.service` but deliberately does not enable or start it. This keeps the target poller waiting inactive while the source poller remains live.
 
 When the environment file is absent, the installer creates a root-owned mode `0600` sentinel containing `BOT_TOKEN=REPLACE_BEFORE_START` and prints a required-action message. It preserves an existing environment file, enforces its ownership and mode, and never prints its contents. Replace the sentinel without printing the token:
 

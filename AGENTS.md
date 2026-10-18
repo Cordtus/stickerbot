@@ -6,11 +6,13 @@ The Telegram bot is an ES-module Node application. Source lives in `src/`: `bot.
 
 ## Build, Test, and Development Commands
 
-- `npm ci` installs lockfile-resolved dependencies.
-- `npm test` runs the Node test runner (`node --test`).
-- `npm start` starts the bot and requires a local `.env` containing `BOT_TOKEN`.
-- `npm run dev` runs the same entry point under Nodemon.
+- `bun install` installs lockfile-resolved dependencies (`bun.lock`).
+- `bun run test` runs the Node test runner (`node --test`).
+- `bun run start` starts the bot (Node 22 runtime) and requires a local `.env` containing `BOT_TOKEN`.
+- `bun run dev` runs the same entry point under Nodemon.
 - `bash scripts/smoke-production.sh` checks the bounded FFmpeg/VP9 production-media path; use it when changing video processing or deployment scripts.
+
+Bun is the package manager; the bot itself runs on Node (production uses `/opt/node-v22`).
 
 FFmpeg is required for video/GIF support; image-only work can run without it. Native `sharp` and `sqlite3` modules must be installed on the target platform; do not copy `node_modules` between architectures.
 
@@ -20,7 +22,7 @@ Use ESM imports with explicit `.js` extensions. Follow the touched file's existi
 
 ## Testing Guidelines
 
-Add behavior-focused `node:test` coverage in `test/*.test.mjs`, named for the observable requirement (for example, `production install preserves state`). Tests must use isolated temporary directories and clean them up with `t.after`; never require a real token, Telegram network access, or production database. Run `npm test` before submitting changes, especially after edits to `scripts/`, `stickerbot.service`, or runtime paths.
+Add behavior-focused `node:test` coverage in `test/*.test.mjs`, named for the observable requirement (for example, `production install preserves state`). Tests must use isolated temporary directories and clean them up with `t.after`; never require a real token, Telegram network access, or production database. Run `bun run test` before submitting changes, especially after edits to `scripts/`, `stickerbot.service`, or runtime paths.
 
 ## Commit & Pull Request Guidelines
 
