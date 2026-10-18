@@ -1,0 +1,22 @@
+name: CI
+
+on: push
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Mirrors the nodev2 `cordtus-stickerbot` runner class labels.
+    runs-on: [self-hosted, linux, x64, nodev2, docker, runner-class-cac]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
