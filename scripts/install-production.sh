@@ -12,7 +12,7 @@ ENV_DIR="${ENV_DIR:-/etc/stickerbot}"
 SERVICE_USER="${SERVICE_USER:-stickerbot}"
 SERVICE_GROUP="${SERVICE_GROUP:-stickerbot}"
 NODE_BIN="${NODE_BIN:-/opt/node-v22/bin/node}"
-NPM_BIN="${NPM_BIN:-/opt/node-v22/bin/npm}"
+BUN_BIN="${BUN_BIN:-/opt/bun/bin/bun}"
 FFMPEG_BIN="${FFMPEG_BIN:-/usr/bin/ffmpeg}"
 FFPROBE_BIN="${FFPROBE_BIN:-/usr/bin/ffprobe}"
 TIMEOUT_BIN="${TIMEOUT_BIN:-/usr/bin/timeout}"
@@ -31,7 +31,7 @@ root_run() {
 	"${SUDO[@]}" "$@"
 }
 
-for required_file in package.json package-lock.json stickerbot.service scripts/smoke-production.sh; do
+for required_file in package.json bun.lock stickerbot.service scripts/smoke-production.sh; do
 	if [[ ! -f "$SOURCE_DIR/$required_file" ]]; then
 		echo "Missing release file: $SOURCE_DIR/$required_file" >&2
 		exit 1
@@ -41,7 +41,7 @@ if [[ ! -d "$SOURCE_DIR/src" ]]; then
 	echo "Missing release source directory: $SOURCE_DIR/src" >&2
 	exit 1
 fi
-for binary in "$NODE_BIN" "$NPM_BIN" "$FFMPEG_BIN" "$FFPROBE_BIN" "$TIMEOUT_BIN"; do
+for binary in "$NODE_BIN" "$BUN_BIN" "$FFMPEG_BIN" "$FFPROBE_BIN" "$TIMEOUT_BIN"; do
 	if [[ ! -x "$binary" ]]; then
 		echo "Required executable is missing: $binary" >&2
 		exit 1
@@ -74,16 +74,17 @@ fi
 root_run mkdir -p "$INSTALL_DIR"
 root_run chown "root:$SERVICE_GROUP" "$INSTALL_DIR"
 root_run chmod 0755 "$INSTALL_DIR"
+# Bun --production does not prune existing devDependencies, so wipe first.
 root_run rm -rf "$INSTALL_DIR/src" "$INSTALL_DIR/scripts" "$INSTALL_DIR/node_modules"
 root_run cp -r "$SOURCE_DIR/src" "$INSTALL_DIR/src"
 if [[ -d "$SOURCE_DIR/scripts" ]]; then
 	root_run cp -r "$SOURCE_DIR/scripts" "$INSTALL_DIR/scripts"
 fi
-root_run cp "$SOURCE_DIR/package.json" "$SOURCE_DIR/package-lock.json" "$INSTALL_DIR/"
+root_run cp "$SOURCE_DIR/package.json" "$SOURCE_DIR/bun.lock" "$INSTALL_DIR/"
 if [[ -f "$SOURCE_DIR/README.md" ]]; then
 	root_run cp "$SOURCE_DIR/README.md" "$INSTALL_DIR/"
 fi
-immutable_paths=("$INSTALL_DIR/src" "$INSTALL_DIR/package.json" "$INSTALL_DIR/package-lock.json")
+immutable_paths=("$INSTALL_DIR/src" "$INSTALL_DIR/package.json" "$INSTALL_DIR/bun.lock")
 if [[ -d "$INSTALL_DIR/scripts" ]]; then
 	immutable_paths+=("$INSTALL_DIR/scripts")
 fi
@@ -139,7 +140,7 @@ fi
 # Rebuild sharp/sqlite3 for the target architecture. Never copy node_modules or
 # package-manager caches from the source machine.
 cd "$INSTALL_DIR"
-root_run "$NPM_BIN" ci --omit=dev
+root_run "$BUN_BIN" install --production --frozen-lockfile
 root_run chown -R root:root "$INSTALL_DIR/node_modules"
 root_run chmod -R u=rwX,go=rX "$INSTALL_DIR/node_modules"
 root_run "$NODE_BIN" --input-type=module -e "await import('sharp'); await import('sqlite3');"

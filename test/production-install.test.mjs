@@ -83,14 +83,12 @@ test('production installer preserves state, installs native dependencies, and le
 	mkdirSync(binDir);
 	cpSync(path.join(PROJECT_DIR, 'src'), path.join(sourceDir, 'src'), { recursive: true });
 	cpSync(path.join(PROJECT_DIR, 'scripts'), path.join(sourceDir, 'scripts'), { recursive: true });
-	for (const file of ['package.json', 'package-lock.json', 'README.md', 'stickerbot.service']) {
+	for (const file of ['package.json', 'bun.lock', 'README.md', 'stickerbot.service']) {
 		cpSync(path.join(PROJECT_DIR, file), path.join(sourceDir, file));
 	}
 	writeFileSync(path.join(sourceDir, '.env'), 'BOT_TOKEN=must-not-copy\n');
 	mkdirSync(path.join(sourceDir, 'node_modules'));
 	writeFileSync(path.join(sourceDir, 'node_modules/arm-native.node'), 'arm-cache\n');
-	mkdirSync(path.join(sourceDir, '.npm'));
-	writeFileSync(path.join(sourceDir, '.npm/cache'), 'cache\n');
 	writeFileSync(path.join(installDir, 'data/stickerpacks.db'), 'persistent-db\n');
 	writeFileSync(path.join(installDir, 'temp/in-flight.tmp'), 'keep-during-install\n');
 
@@ -101,9 +99,9 @@ test('production installer preserves state, installs native dependencies, and le
 		'exec "$@"',
 		'',
 	].join('\n'));
-	executable(path.join(binDir, 'npm'), [
+	executable(path.join(binDir, 'bun'), [
 		'#!/usr/bin/env bash',
-		'printf "npm cwd=%s args=%s\\n" "$PWD" "$*" >> "$COMMAND_LOG"',
+		'printf "bun cwd=%s args=%s\\n" "$PWD" "$*" >> "$COMMAND_LOG"',
 		'mkdir -p node_modules',
 		'printf "target-native\\n" > node_modules/target-native.node',
 		'',
@@ -160,7 +158,7 @@ test('production installer preserves state, installs native dependencies, and le
 			UNIT_DIR: unitDir,
 			ENV_DIR: envDir,
 			NODE_BIN: path.join(binDir, 'node'),
-			NPM_BIN: path.join(binDir, 'npm'),
+			BUN_BIN: path.join(binDir, 'bun'),
 			FFMPEG_BIN: path.join(binDir, 'ffmpeg'),
 			FFPROBE_BIN: path.join(binDir, 'ffprobe'),
 			TIMEOUT_BIN: path.join(binDir, 'timeout'),
@@ -181,7 +179,6 @@ test('production installer preserves state, installs native dependencies, and le
 	assert.equal(mode(path.join(installDir, 'data')), 0o700);
 	assert.equal(mode(path.join(installDir, 'temp')), 0o700);
 	assert.equal(existsSync(path.join(installDir, '.env')), false);
-	assert.equal(existsSync(path.join(installDir, '.npm')), false);
 	assert.equal(existsSync(path.join(installDir, 'node_modules/arm-native.node')), false);
 	assert.equal(readFileSync(path.join(installDir, 'node_modules/target-native.node'), 'utf8'), 'target-native\n');
 	assert.equal(existsSync(path.join(unitDir, 'stickerbot.service')), true);
@@ -192,7 +189,7 @@ test('production installer preserves state, installs native dependencies, and le
 	assert.match(result.stdout, /REQUIRED ACTION.*stickerbot\.env/);
 
 	const commands = readFileSync(commandLog, 'utf8');
-	assert.match(commands, new RegExp(`npm cwd=${installDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} args=ci --omit=dev`));
+	assert.match(commands, new RegExp(`bun cwd=${installDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} args=install --production --frozen-lockfile`));
 	assert.match(commands, /node --input-type=module -e/);
 	assert.match(commands, /ffmpeg -version/);
 	assert.match(commands, /ffmpeg .* -encoders/);
@@ -219,7 +216,7 @@ test('production installer preserves state, installs native dependencies, and le
 			UNIT_DIR: unitDir,
 			ENV_DIR: envDir,
 			NODE_BIN: path.join(binDir, 'node'),
-			NPM_BIN: path.join(binDir, 'npm'),
+			BUN_BIN: path.join(binDir, 'bun'),
 			FFMPEG_BIN: path.join(binDir, 'ffmpeg'),
 			FFPROBE_BIN: path.join(binDir, 'ffprobe'),
 			TIMEOUT_BIN: path.join(binDir, 'timeout'),
