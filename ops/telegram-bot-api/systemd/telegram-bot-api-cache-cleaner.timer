@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly Telegram Bot API cache retention report
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=telegram-bot-api-cache-cleaner.service
+
+[Install]
+WantedBy=timers.target
