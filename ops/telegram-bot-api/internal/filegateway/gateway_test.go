@@ -242,6 +242,22 @@ func TestGatewayNeverLogsTokenOrAbsolutePath(t *testing.T) {
 	}
 }
 
+func TestGatewayRefusesBotAPIStateFiles(t *testing.T) {
+	stateRoot := t.TempDir()
+	handler := newHandler(t, stateRoot, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	for _, name := range []string{"td.binlog", "config.json", "database/db"} {
+		requestedPath := writeStateFile(t, stateRoot, ownerToken, name, []byte("bot secret"))
+		request := httptest.NewRequest(http.MethodGet, fileURL(ownerToken, requestedPath), nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("GET %s status = %d, want %d", name, response.Code, http.StatusNotFound)
+		}
+	}
+}
+
 func newHandler(t *testing.T, stateRoot string, logger *slog.Logger) http.Handler {
 	t.Helper()
 	handler, err := NewHandler(Config{StateRoot: stateRoot, Logger: logger})

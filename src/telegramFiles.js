@@ -1,11 +1,10 @@
 import path from 'node:path';
-import { createTelegramConfig } from './telegramConfig.js';
+import { resolveTelegramRoots } from './telegramConfig.js';
 
 function resolveTelegramFile(ctx, fileId, options = {}) {
-	const config = createTelegramConfig();
 	return resolveFile(ctx, fileId, {
 		botToken: options.botToken ?? process.env.BOT_TOKEN,
-		fileRoot: options.fileRoot ?? config.fileRoot,
+		fileRoot: options.fileRoot ?? resolveTelegramRoots().fileRoot,
 	});
 }
 
@@ -32,9 +31,14 @@ async function fetchTelegramFile(ctx, fileId, options = {}) {
 	const resolved = await resolveTelegramFile(ctx, fileId, resolutionOptions);
 
 	try {
-		const response = await fetchImpl(resolved.url);
+		const response = await fetchImpl(resolved.url, {
+			signal: AbortSignal.timeout(30000),
+		});
 		if (!response.ok) {
-			throw { name: 'HTTPError', status: response.status };
+			const error = new Error('Telegram file download failed');
+			error.name = 'HTTPError';
+			error.status = response.status;
+			throw error;
 		}
 		return { ...resolved, buffer: Buffer.from(await response.arrayBuffer()) };
 	} catch (error) {

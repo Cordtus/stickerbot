@@ -41,11 +41,17 @@ function buildTelegramMethodUrl(apiRoot, token, method) {
 	return new URL(`/bot${token}/${method}`, `${apiRoot}/`);
 }
 
+function resolveTelegramRoots(environment = process.env) {
+	return {
+		apiRoot: normalizeRoot(environment.TELEGRAM_API_ROOT || publicApiRoot, 'TELEGRAM_API_ROOT'),
+		fileRoot: environment.TELEGRAM_FILE_ROOT
+			? normalizeRoot(environment.TELEGRAM_FILE_ROOT, 'TELEGRAM_FILE_ROOT')
+			: undefined,
+	};
+}
+
 function createTelegramConfig(environment = process.env) {
-	const apiRoot = normalizeRoot(environment.TELEGRAM_API_ROOT || publicApiRoot, 'TELEGRAM_API_ROOT');
-	const fileRoot = environment.TELEGRAM_FILE_ROOT
-		? normalizeRoot(environment.TELEGRAM_FILE_ROOT, 'TELEGRAM_FILE_ROOT')
-		: undefined;
+	const { apiRoot, fileRoot } = resolveTelegramRoots(environment);
 
 	return {
 		apiRoot,
@@ -55,6 +61,8 @@ function createTelegramConfig(environment = process.env) {
 	};
 }
 
+// Telegraf clears a custom agent for plain-HTTP API roots; re-apply it so local
+// Bot API traffic keeps the configured keepalive agent.
 function applyTelegramAgent(telegram, config) {
 	if (!telegram?.options) {
 		throw new Error('Telegram client options are required');
@@ -68,4 +76,5 @@ export {
 	buildTelegramMethodUrl,
 	createTelegramAgent,
 	createTelegramConfig,
+	resolveTelegramRoots,
 };

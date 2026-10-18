@@ -12,6 +12,24 @@ import (
 var (
 	tokenPattern = regexp.MustCompile(`^[0-9]{5,}:[A-Za-z0-9_-]+$`)
 	botIDPattern = regexp.MustCompile(`^[0-9]{5,}$`)
+	// mediaDirectories keeps the gateway to downloaded media. Bot API state
+	// (td.binlog, database/, config) must never be fetchable through it.
+	// ponytail: duplicated from cachecleaner; share if a third consumer appears.
+	mediaDirectories = map[string]struct{}{
+		"animations":          {},
+		"documents":           {},
+		"music":               {},
+		"notification_sounds": {},
+		"photos":              {},
+		"profile_photos":      {},
+		"stickers":            {},
+		"stories":             {},
+		"thumbnails":          {},
+		"video_notes":         {},
+		"videos":              {},
+		"voice":               {},
+		"wallpapers":          {},
+	}
 )
 
 type Config struct {
@@ -109,6 +127,10 @@ func (h *handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		response.WriteHeader(http.StatusNotFound)
 		return
 	}
+	if !isMediaPath(fileName) {
+		response.WriteHeader(http.StatusNotFound)
+		return
+	}
 	if strings.HasSuffix(filepath.Base(filePath), ".part") {
 		response.WriteHeader(http.StatusNotFound)
 		return
@@ -192,4 +214,10 @@ func isWithin(root, path string) bool {
 		return false
 	}
 	return relativePath != "." && relativePath != ".." && !strings.HasPrefix(relativePath, ".."+string(filepath.Separator))
+}
+
+func isMediaPath(name string) bool {
+	first, _, _ := strings.Cut(filepath.ToSlash(name), "/")
+	_, ok := mediaDirectories[first]
+	return ok
 }

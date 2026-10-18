@@ -199,8 +199,10 @@ State and temporary files live in mode-`0700`
 `/var/lib/telegram-bot-api/{state,tmp}`; service logs are in mode-`0750`
 `/var/log/telegram-bot-api`. The API and gateway intentionally listen on
 `0.0.0.0:8081` and `0.0.0.0:8082` for the LXD network only. Keep those ports
-off the public network. The gateway validates the calling token's native state
-directory and does not log tokens or absolute file paths.
+off the public network. The gateway carries the bot token in its request path
+and serves cleartext HTTP, so treat every peer on the LXD bridge as trusted.
+The gateway validates the calling token's native state directory, serves only
+allowlisted media directories, and does not log tokens or absolute file paths.
 
 ### Cache retention and activation
 
